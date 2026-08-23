@@ -19,6 +19,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.database.SQLException
+import android.net.NetworkCapabilities
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
@@ -118,8 +119,13 @@ import com.metrolist.music.constants.AutoplayKey
 import com.metrolist.music.constants.CrossfadeDurationKey
 import com.metrolist.music.constants.CrossfadeEnabledKey
 import com.metrolist.music.constants.CrossfadeGaplessKey
+import com.metrolist.music.constants.DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY
 import com.metrolist.music.constants.DisableLoadMoreWhenRepeatAllKey
+import com.metrolist.music.constants.EchoBrainAllowAlternativeVersionsKey
 import com.metrolist.music.constants.EchoBrainEnabledKey
+import com.metrolist.music.constants.EchoBrainMinimumSimilarityKey
+import com.metrolist.music.constants.EchoBrainNetworkMode
+import com.metrolist.music.constants.EchoBrainNetworkModeKey
 import com.metrolist.music.constants.DiscordActivityNameKey
 import com.metrolist.music.constants.DiscordActivityTypeKey
 import com.metrolist.music.constants.DiscordAdvancedModeKey
@@ -502,6 +508,14 @@ class MusicService :
     private var cachedAutoLoadMore = true
     @Volatile
     private var cachedEchoBrainEnabled = true
+    @Volatile
+    private var cachedEchoBrainMinimumSimilarity = DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY
+    @Volatile
+    private var cachedEchoBrainAllowAlternativeVersions = false
+    @Volatile
+    private var cachedEchoBrainNetworkMode = EchoBrainNetworkMode.WIFI_ONLY
+    @Volatile
+    private var cachedEchoBrainVaultArtistIds: Set<String>? = null
     private val echoBrainProcessedSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInFlightSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInjectedItemIds = Collections.synchronizedSet(mutableSetOf<String>())
@@ -1188,6 +1202,24 @@ class MusicService :
                         ?.let(::injectEchoBrainRecommendations)
                 }
             }
+        }
+        scope.launch {
+            dataStore.data
+                .map { it[EchoBrainMinimumSimilarityKey] ?: DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY }
+                .distinctUntilChanged()
+                .collect { cachedEchoBrainMinimumSimilarity = it.coerceIn(60, 100) }
+        }
+        scope.launch {
+            dataStore.data
+                .map { it[EchoBrainAllowAlternativeVersionsKey] ?: false }
+                .distinctUntilChanged()
+                .collect { cachedEchoBrainAllowAlternativeVersions = it }
+        }
+        scope.launch {
+            dataStore.data
+                .map { EchoBrainNetworkMode.fromPreference(it[EchoBrainNetworkModeKey]) }
+                .distinctUntilChanged()
+                .collect { cachedEchoBrainNetworkMode = it }
         }
         // Keep InnerTubeX extraction in sync with the stream source toggles.
         // Map to the derived set + distinctUntilChanged so an unrelated preference write doesn't
@@ -2329,10 +2361,28 @@ class MusicService :
                 val queuedIds = queuedItems.mapTo(mutableSetOf()) { it.mediaId }
                 val blockedSongKeys =
                     EchoBrainQueuePlanner.canonicalSongKeys(queuedItems) + echoBrainInjectedSongKeys
+                val allowNetwork = canUseEchoBrainNetwork()
+                val seedItem = player.currentMediaItem ?: return@launch
+                val currentIndex = player.currentMediaItemIndex
+                val momentArtistIds =
+                    queuedItems
+                        .subList((currentIndex - 3).coerceAtLeast(0), currentIndex.coerceAtLeast(0))
+                        .flatMap { it.metadata?.artists.orEmpty() }
+                        .mapNotNull { it.id }
+                        .filter { it.isNotBlank() }
+                        .toSet()
+                val vaultArtistIds = withContext(Dispatchers.IO) { echoBrainVaultArtistIds() }
+                val maximumBatchSize =
+                    if (cachedEchoBrainMinimumSimilarity >= DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY) {
+                        1
+                    } else {
+                        EchoBrainQueuePlanner.DEFAULT_BATCH_SIZE
+                    }
                 val relatedSongs = withContext(Dispatchers.IO) {
                     loadEchoBrainRelatedSongs(
                         seedMediaId = seedMediaId,
                         excludedIds = queuedIds + echoBrainInjectedItemIds,
+                        allowNetwork = allowNetwork,
                     )
                 }
                 if (!cachedEchoBrainEnabled) return@launch
@@ -2346,9 +2396,14 @@ class MusicService :
                         queuedIds = queuedIds,
                         previouslyInjectedIds = echoBrainInjectedItemIds,
                         blockedSongKeys = blockedSongKeys,
+                        momentArtistIds = momentArtistIds,
+                        vaultArtistIds = vaultArtistIds,
+                        minimumSimilarity = cachedEchoBrainMinimumSimilarity,
+                        allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
+                        maxItems = maximumBatchSize,
                     )
                 val recommendations =
-                    if (localRecommendations.isNotEmpty()) {
+                    if (localRecommendations.isNotEmpty() || !allowNetwork) {
                         localRecommendations
                     } else {
                         withContext(Dispatchers.IO) {
@@ -2356,6 +2411,10 @@ class MusicService :
                                 seedMediaId = seedMediaId,
                                 excludedIds = queuedIds + echoBrainInjectedItemIds,
                                 blockedSongKeys = blockedSongKeys,
+                                seed = seedItem,
+                                momentArtistIds = momentArtistIds,
+                                vaultArtistIds = vaultArtistIds,
+                                maxItems = maximumBatchSize,
                             )
                         }
                     }
@@ -2399,6 +2458,10 @@ class MusicService :
         seedMediaId: String,
         excludedIds: Set<String>,
         blockedSongKeys: Set<String>,
+        seed: MediaItem,
+        momentArtistIds: Set<String>,
+        vaultArtistIds: Set<String>,
+        maxItems: Int,
     ): List<MediaItem> =
         runCatching {
             val radioQueue =
@@ -2415,6 +2478,12 @@ class MusicService :
                 queuedIds = excludedIds,
                 previouslyInjectedIds = emptySet(),
                 blockedSongKeys = blockedSongKeys,
+                seed = seed,
+                momentArtistIds = momentArtistIds,
+                vaultArtistIds = vaultArtistIds,
+                minimumSimilarity = cachedEchoBrainMinimumSimilarity,
+                allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
+                maxItems = maxItems,
             )
             if (initialSelection.isNotEmpty() || !radioQueue.hasNextPage()) {
                 initialSelection
@@ -2426,6 +2495,12 @@ class MusicService :
                     queuedIds = excludedIds,
                     previouslyInjectedIds = emptySet(),
                     blockedSongKeys = blockedSongKeys,
+                    seed = seed,
+                    momentArtistIds = momentArtistIds,
+                    vaultArtistIds = vaultArtistIds,
+                    minimumSimilarity = cachedEchoBrainMinimumSimilarity,
+                    allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
+                    maxItems = maxItems,
                 )
             }
         }.onFailure { error ->
@@ -2448,9 +2523,10 @@ class MusicService :
     private suspend fun loadEchoBrainRelatedSongs(
         seedMediaId: String,
         excludedIds: Set<String>,
+        allowNetwork: Boolean,
     ): List<Song> {
         val cachedSongs = database.relatedSongs(seedMediaId)
-        if (cachedSongs.any { it.id !in excludedIds }) return cachedSongs
+        if (cachedSongs.any { it.id !in excludedIds } || !allowNetwork) return cachedSongs
 
         val relatedEndpoint =
             YouTube.next(WatchEndpoint(videoId = seedMediaId)).getOrNull()?.relatedEndpoint
@@ -2464,6 +2540,37 @@ class MusicService :
                 .forEach(::insert)
         }
         return database.relatedSongs(seedMediaId)
+    }
+
+    /** Echo Brain only requests fresh relationships when the configured transport permits it. */
+    private fun canUseEchoBrainNetwork(): Boolean =
+        when (cachedEchoBrainNetworkMode) {
+            EchoBrainNetworkMode.LOCAL_ONLY -> false
+            EchoBrainNetworkMode.ANY_NETWORK -> isNetworkConnected.value
+            EchoBrainNetworkMode.WIFI_ONLY -> {
+                val activeNetwork = connectivityManager.activeNetwork
+                connectivityManager.getNetworkCapabilities(activeNetwork)
+                    ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+        }
+
+    /**
+     * Bóveda local: top artists from listening history. The result is cached for the service
+     * session so transitions do not repeatedly query the database or use the network.
+     */
+    private suspend fun echoBrainVaultArtistIds(): Set<String> {
+        cachedEchoBrainVaultArtistIds?.let { return it }
+        return database
+            .mostPlayedSongs(
+                fromTimeStamp = LocalDateTime.of(1970, 1, 1, 0, 0),
+                limit = 20,
+            )
+            .first()
+            .flatMap { it.orderedArtists }
+            .map { it.id }
+            .filter { it.isNotBlank() }
+            .toSet()
+            .also { cachedEchoBrainVaultArtistIds = it }
     }
 
     private fun seedLoudnessCacheFromPrefs() {

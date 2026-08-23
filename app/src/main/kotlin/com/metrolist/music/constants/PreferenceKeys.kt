@@ -136,6 +136,23 @@ enum class LoudnessLevel(
 val AutoLoadMoreKey = booleanPreferencesKey("autoLoadMore")
 val AutoRadioQueueKey = booleanPreferencesKey("autoRadioQueue")
 val EchoBrainEnabledKey = booleanPreferencesKey("echoBrainEnabled")
+const val DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY = 90
+val EchoBrainMinimumSimilarityKey = intPreferencesKey("echoBrainMinimumSimilarity")
+val EchoBrainAllowAlternativeVersionsKey = booleanPreferencesKey("echoBrainAllowAlternativeVersions")
+val EchoBrainNetworkModeKey = stringPreferencesKey("echoBrainNetworkMode")
+
+enum class EchoBrainNetworkMode {
+    LOCAL_ONLY,
+    WIFI_ONLY,
+    ANY_NETWORK,
+    ;
+
+    companion object {
+        fun fromPreference(value: String?): EchoBrainNetworkMode =
+            entries.find { it.name == value } ?: WIFI_ONLY
+    }
+}
+
 val DisableLoadMoreWhenRepeatAllKey = booleanPreferencesKey("disableLoadMoreWhenRepeatAll")
 val AutoDownloadOnLikeKey = booleanPreferencesKey("autoDownloadOnLike")
 val SimilarContent = booleanPreferencesKey("similarContent")

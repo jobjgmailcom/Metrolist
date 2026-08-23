@@ -14,9 +14,9 @@ import java.text.Normalizer
 /**
  * Selects a small, deterministic Echo Brain batch from the locally persisted related-song graph.
  *
- * The scoring deliberately favors feedback already stored on-device (likes, library membership,
- * downloads, play time, and metadata affinity). Network calls are only used by MusicService to
- * fill a missing related-song cache; this class never performs I/O and never changes the queue.
+ * Selection is intentionally conservative: a batch may contain fewer than three songs when no
+ * candidate reaches the listener's minimum affinity. This is preferable to injecting unrelated
+ * music merely to fill a queue slot.
  */
 internal object EchoBrainQueuePlanner {
     const val DEFAULT_BATCH_SIZE = 3
@@ -28,6 +28,10 @@ internal object EchoBrainQueuePlanner {
         queuedIds: Set<String>,
         previouslyInjectedIds: Set<String>,
         blockedSongKeys: Set<String> = emptySet(),
+        momentArtistIds: Set<String> = emptySet(),
+        vaultArtistIds: Set<String> = emptySet(),
+        minimumSimilarity: Int = 0,
+        allowAlternativeVersions: Boolean = true,
         maxItems: Int = DEFAULT_BATCH_SIZE,
     ): List<MediaItem> {
         val seedArtistIds = seed?.orderedArtists?.map { it.id }?.toSet().orEmpty()
@@ -39,47 +43,87 @@ internal object EchoBrainQueuePlanner {
                 candidate.id.isNotBlank() &&
                     candidate.id !in queuedIds &&
                     candidate.id !in previouslyInjectedIds &&
-                    canonicalSongKey(candidate) !in blockedSongKeys
+                    canonicalSongKey(candidate) !in blockedSongKeys &&
+                    (allowAlternativeVersions || !isAlternativeVersion(candidate.song.title)) &&
+                    similarityScore(
+                        candidate,
+                        seedArtistIds,
+                        seedAlbumId,
+                        momentArtistIds,
+                        vaultArtistIds,
+                    ) >= minimumSimilarity
             }
             .distinctBy { it.id }
             .sortedWith(
                 compareByDescending<Song> {
-                    score(
-                        candidate = it,
-                        seedArtistIds = seedArtistIds,
-                        seedAlbumId = seedAlbumId,
+                    similarityScore(
+                        it,
+                        seedArtistIds,
+                        seedAlbumId,
+                        momentArtistIds,
+                        vaultArtistIds,
                     )
-                }.thenBy { it.id },
+                }
+                    .thenByDescending { score(it, seedArtistIds, seedAlbumId) }
+                    .thenBy { it.id },
             )
             .distinctBy(::canonicalSongKey)
+            .distinctBy(::primaryArtistKey)
             .take(maxItems)
             .map(Song::toMediaItem)
             .toList()
     }
 
     /**
-     * Keeps the first genuinely new items from MetroList's radio generator. The radio queue is
-     * already resilient to sparse related pages, so it is the fallback when local relations are
-     * empty or completely occupied by the current queue.
+     * Keeps the first safe items from MetroList's radio generator. Radio offers the initial
+     * relationship signal but must still meet the configured similarity threshold.
      */
     fun selectRadioItems(
         candidates: List<MediaItem>,
         queuedIds: Set<String>,
         previouslyInjectedIds: Set<String>,
         blockedSongKeys: Set<String> = emptySet(),
+        seed: MediaItem? = null,
+        momentArtistIds: Set<String> = emptySet(),
+        vaultArtistIds: Set<String> = emptySet(),
+        minimumSimilarity: Int = 0,
+        allowAlternativeVersions: Boolean = true,
         maxItems: Int = DEFAULT_BATCH_SIZE,
-    ): List<MediaItem> =
-        candidates
+    ): List<MediaItem> {
+        val seedMetadata = seed?.metadata
+        val seedArtists = seedMetadata?.artists?.mapNotNull { it.id }?.toSet().orEmpty()
+        val seedAlbum = normalize(seedMetadata?.album?.id.orEmpty())
+
+        return candidates
             .asSequence()
             .filter { candidate ->
                 candidate.mediaId.isNotBlank() &&
                     candidate.mediaId !in queuedIds &&
                     candidate.mediaId !in previouslyInjectedIds &&
-                    canonicalSongKey(candidate) !in blockedSongKeys
+                    canonicalSongKey(candidate) !in blockedSongKeys &&
+                    (allowAlternativeVersions || !isAlternativeVersion(candidate.metadata?.title.orEmpty())) &&
+                    radioSimilarityScore(
+                        candidate,
+                        seedArtists,
+                        seedAlbum,
+                        momentArtistIds,
+                        vaultArtistIds,
+                    ) >= minimumSimilarity
+            }
+            .sortedByDescending {
+                radioSimilarityScore(
+                    it,
+                    seedArtists,
+                    seedAlbum,
+                    momentArtistIds,
+                    vaultArtistIds,
+                )
             }
             .distinctBy(::canonicalSongKey)
+            .distinctBy(::primaryArtistKey)
             .take(maxItems)
             .toList()
+    }
 
     /**
      * A YouTube mix can expose the same recording under distinct queue or video identifiers.
@@ -88,6 +132,41 @@ internal object EchoBrainQueuePlanner {
      */
     fun canonicalSongKeys(items: Iterable<MediaItem>): Set<String> =
         items.mapTo(mutableSetOf(), ::canonicalSongKey)
+
+    private fun similarityScore(
+        candidate: Song,
+        seedArtistIds: Set<String>,
+        seedAlbumId: String?,
+        momentArtistIds: Set<String>,
+        vaultArtistIds: Set<String>,
+    ): Int {
+        val song = candidate.song
+        val artists = candidate.orderedArtists.map { it.id }.toSet()
+        var score = 60 // The persisted related-song graph is the baseline relation signal.
+        if (artists.any { it in seedArtistIds }) score += 30 // Ancla: la pista activa.
+        if (artists.any { it in momentArtistIds }) score += 15 // Momento: la sesión reciente.
+        if (artists.any { it in vaultArtistIds }) score += 10 // Bóveda: gustos locales.
+        if (seedAlbumId != null && song.albumId == seedAlbumId) score += 10
+        if (song.liked || song.inLibrary != null || song.isDownloaded) score += 5
+        return score.coerceAtMost(100)
+    }
+
+    private fun radioSimilarityScore(
+        candidate: MediaItem,
+        seedArtists: Set<String>,
+        seedAlbum: String,
+        momentArtistIds: Set<String>,
+        vaultArtistIds: Set<String>,
+    ): Int {
+        val metadata = candidate.metadata
+        val artists = metadata?.artists?.mapNotNull { it.id }?.toSet().orEmpty()
+        var score = 60 // Radio is the baseline relation signal.
+        if (artists.any { it in seedArtists }) score += 30
+        if (artists.any { it in momentArtistIds }) score += 15
+        if (artists.any { it in vaultArtistIds }) score += 10
+        if (seedAlbum.isNotBlank() && normalize(metadata?.album?.id.orEmpty()) == seedAlbum) score += 10
+        return score.coerceAtMost(100)
+    }
 
     private fun canonicalSongKey(song: Song): String =
         canonicalSongKey(
@@ -106,6 +185,13 @@ internal object EchoBrainQueuePlanner {
         )
     }
 
+    private fun primaryArtistKey(song: Song): String =
+        normalize(song.orderedArtists.firstOrNull()?.name.orEmpty()).ifBlank { canonicalSongKey(song) }
+
+    private fun primaryArtistKey(mediaItem: MediaItem): String =
+        normalize(mediaItem.metadata?.artists?.firstOrNull()?.name.orEmpty())
+            .ifBlank { canonicalSongKey(mediaItem) }
+
     private fun canonicalSongKey(
         title: String,
         artistNames: List<String>,
@@ -118,6 +204,11 @@ internal object EchoBrainQueuePlanner {
         } else {
             "$normalizedTitle|${normalizedArtists.joinToString(",")}"
         }
+    }
+
+    private fun isAlternativeVersion(title: String): Boolean {
+        val normalizedTitle = normalize(title)
+        return AlternativeVersionMarkers.any(normalizedTitle::contains)
     }
 
     private fun normalize(value: String): String =
@@ -172,4 +263,21 @@ internal object EchoBrainQueuePlanner {
             value += amount
         }
     }
+
+    private val AlternativeVersionMarkers =
+        listOf(
+            "remix",
+            "live",
+            "envivo",
+            "acoustic",
+            "acustica",
+            "acustico",
+            "cover",
+            "instrumental",
+            "session",
+            "version",
+            "karaoke",
+            "slowed",
+            "spedup",
+        )
 }

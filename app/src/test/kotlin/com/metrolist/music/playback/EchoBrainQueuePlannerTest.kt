@@ -1,6 +1,7 @@
 package com.metrolist.music.playback
 
 import androidx.media3.common.MediaItem
+import com.metrolist.music.db.entities.ArtistEntity
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.db.entities.SongEntity
 import com.metrolist.music.models.MediaMetadata
@@ -121,6 +122,46 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `strict 90 similarity accepts only anchor or reinforced local context`() {
+        val seed = song(id = "seed", artistId = "anchor")
+        val anchorMatch = song(id = "anchor-match", artistId = "anchor")
+        val reinforcedContext = song(id = "trusted-match", artistId = "trusted", liked = true)
+        val momentOnly = song(id = "moment-only", artistId = "moment")
+        val unrelated = song(id = "unrelated", artistId = "other", liked = true)
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = seed,
+            relatedSongs = listOf(unrelated, momentOnly, reinforcedContext, anchorMatch),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            momentArtistIds = setOf("trusted", "moment"),
+            vaultArtistIds = setOf("trusted"),
+            minimumSimilarity = 90,
+            allowAlternativeVersions = false,
+        )
+
+        assertEquals(listOf("trusted-match", "anchor-match"), selected.map { it.mediaId })
+    }
+
+    @Test
+    fun `strict selection blocks alternative versions when disabled`() {
+        val seed = song(id = "seed", artistId = "anchor")
+        val liveVersion = song(id = "live", title = "Tema en vivo", artistId = "anchor")
+        val mainRecording = song(id = "main", title = "Tema nuevo", artistId = "anchor")
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = seed,
+            relatedSongs = listOf(liveVersion, mainRecording),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            minimumSimilarity = 90,
+            allowAlternativeVersions = false,
+        )
+
+        assertEquals(listOf("main"), selected.map { it.mediaId })
+    }
+
+    @Test
     fun `automatic injection starts a mix and refills when the last Echo Brain item plays`() {
         assertEquals(
             true,
@@ -169,6 +210,7 @@ class EchoBrainQueuePlannerTest {
         title: String = id,
         liked: Boolean = false,
         totalPlayTime: Long = 0L,
+        artistId: String? = null,
     ): Song =
         Song(
             song = SongEntity(
@@ -177,7 +219,7 @@ class EchoBrainQueuePlannerTest {
                 liked = liked,
                 totalPlayTime = totalPlayTime,
             ),
-            artists = emptyList(),
+            artists = artistId?.let { listOf(ArtistEntity(id = it, name = it)) }.orEmpty(),
         )
 
     private fun mediaItem(
