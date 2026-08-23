@@ -22,14 +22,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
@@ -46,12 +42,9 @@ import com.metrolist.music.utils.rememberPreference
 fun EchoBrainSettings(
     navController: NavController,
 ) {
-    val playerConnection = LocalPlayerConnection.current ?: return
+    LocalPlayerConnection.current ?: return
     val (echoBrainEnabled, onEchoBrainEnabledChange) =
         rememberPreference(EchoBrainEnabledKey, defaultValue = true)
-    val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
-    val activeTrackTitle = mediaMetadata?.title?.toString().orEmpty()
-    var injectionRequested by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -99,28 +92,6 @@ fun EchoBrainSettings(
                         )
                     },
                     onClick = { onEchoBrainEnabledChange(!echoBrainEnabled) },
-                ),
-                Material3SettingsItem(
-                    icon = painterResource(R.drawable.playlist_add),
-                    title = { Text(stringResource(R.string.echo_brain_inject_now)) },
-                    description = {
-                        Text(
-                            when {
-                                !echoBrainEnabled -> stringResource(R.string.echo_brain_enable_to_inject)
-                                activeTrackTitle.isBlank() -> stringResource(R.string.echo_brain_no_active_track)
-                                injectionRequested -> stringResource(R.string.echo_brain_injection_requested)
-                                else -> stringResource(
-                                    R.string.echo_brain_inject_now_track,
-                                    activeTrackTitle,
-                                )
-                            },
-                        )
-                    },
-                    enabled = echoBrainEnabled && activeTrackTitle.isNotBlank(),
-                    onClick = {
-                        playerConnection.injectEchoBrainNow()
-                        injectionRequested = true
-                    },
                 ),
             ),
         )

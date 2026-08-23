@@ -85,10 +85,47 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
-    fun `automatic injection runs at queue start and before the original queue ends`() {
-        assertEquals(true, EchoBrainQueuePlanner.shouldAutoInject(currentIndex = 0, mediaItemCount = 50))
-        assertEquals(false, EchoBrainQueuePlanner.shouldAutoInject(currentIndex = 12, mediaItemCount = 50))
-        assertEquals(true, EchoBrainQueuePlanner.shouldAutoInject(currentIndex = 39, mediaItemCount = 50))
+    fun `automatic injection starts a mix and refills when the last Echo Brain item plays`() {
+        assertEquals(
+            true,
+            EchoBrainQueuePlanner.shouldAutoInject(
+                currentIndex = 0,
+                mediaItemCount = 50,
+                currentIsEchoBrainRecommendation = false,
+                nextIsEchoBrainRecommendation = false,
+                hasInjectedRecommendations = false,
+            ),
+        )
+        assertEquals(
+            false,
+            EchoBrainQueuePlanner.shouldAutoInject(
+                currentIndex = 2,
+                mediaItemCount = 53,
+                currentIsEchoBrainRecommendation = true,
+                nextIsEchoBrainRecommendation = true,
+                hasInjectedRecommendations = true,
+            ),
+        )
+        assertEquals(
+            true,
+            EchoBrainQueuePlanner.shouldAutoInject(
+                currentIndex = 3,
+                mediaItemCount = 53,
+                currentIsEchoBrainRecommendation = true,
+                nextIsEchoBrainRecommendation = false,
+                hasInjectedRecommendations = true,
+            ),
+        )
+        assertEquals(
+            true,
+            EchoBrainQueuePlanner.shouldAutoInject(
+                currentIndex = 39,
+                mediaItemCount = 50,
+                currentIsEchoBrainRecommendation = false,
+                nextIsEchoBrainRecommendation = false,
+                hasInjectedRecommendations = false,
+            ),
+        )
     }
 
     private fun song(
