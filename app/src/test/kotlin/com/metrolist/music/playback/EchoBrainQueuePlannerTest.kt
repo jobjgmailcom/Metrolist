@@ -3,6 +3,7 @@ package com.metrolist.music.playback
 import androidx.media3.common.MediaItem
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.db.entities.SongEntity
+import com.metrolist.music.models.MediaMetadata
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -67,6 +68,25 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `select rejects the same recording when it has a different queue identifier`() {
+        val originalMixSong = song(id = "mix-por-sus-besos", title = "POR SUS BESOS")
+        val radioDuplicate = song(id = "radio-por-sus-besos", title = "Por sus Besos")
+        val fresh = song(id = "fresh", title = "Una canción nueva", liked = true)
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = null,
+            relatedSongs = listOf(radioDuplicate, fresh),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            blockedSongKeys = EchoBrainQueuePlanner.canonicalSongKeys(
+                listOf(mediaItem(id = originalMixSong.id, title = originalMixSong.song.title)),
+            ),
+        )
+
+        assertEquals(listOf("fresh"), selected.map { it.mediaId })
+    }
+
+    @Test
     fun `radio fallback selects new tracks when all local queue entries are occupied`() {
         val selected = EchoBrainQueuePlanner.selectRadioItems(
             candidates = listOf(
@@ -82,6 +102,22 @@ class EchoBrainQueuePlannerTest {
         )
 
         assertEquals(listOf("radio-first", "radio-second"), selected.map { it.mediaId })
+    }
+
+    @Test
+    fun `radio fallback rejects a matching title with a different media id`() {
+        val originalMixSong = mediaItem(id = "mix-tu-boda", title = "Tu Boda")
+        val selected = EchoBrainQueuePlanner.selectRadioItems(
+            candidates = listOf(
+                mediaItem(id = "radio-tu-boda", title = "TU BODA"),
+                mediaItem(id = "radio-fresh", title = "Una canción nueva"),
+            ),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            blockedSongKeys = EchoBrainQueuePlanner.canonicalSongKeys(listOf(originalMixSong)),
+        )
+
+        assertEquals(listOf("radio-fresh"), selected.map { it.mediaId })
     }
 
     @Test
@@ -130,19 +166,33 @@ class EchoBrainQueuePlannerTest {
 
     private fun song(
         id: String,
+        title: String = id,
         liked: Boolean = false,
         totalPlayTime: Long = 0L,
     ): Song =
         Song(
             song = SongEntity(
                 id = id,
-                title = id,
+                title = title,
                 liked = liked,
                 totalPlayTime = totalPlayTime,
             ),
             artists = emptyList(),
         )
 
-    private fun mediaItem(id: String): MediaItem =
-        MediaItem.Builder().setMediaId(id).build()
+    private fun mediaItem(
+        id: String,
+        title: String = id,
+    ): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(id)
+            .setUri(id)
+            .setTag(
+                MediaMetadata(
+                    id = id,
+                    title = title,
+                    artists = emptyList(),
+                    duration = 0,
+                ),
+            ).build()
 }
