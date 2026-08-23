@@ -7,7 +7,9 @@ package com.metrolist.music.playback
 
 import androidx.media3.common.MediaItem
 import com.metrolist.music.db.entities.Song
+import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.toMediaItem
+import java.text.Normalizer
 
 /**
  * Selects a small, deterministic Echo Brain batch from the locally persisted related-song graph.
@@ -25,6 +27,7 @@ internal object EchoBrainQueuePlanner {
         relatedSongs: List<Song>,
         queuedIds: Set<String>,
         previouslyInjectedIds: Set<String>,
+        blockedSongKeys: Set<String> = emptySet(),
         maxItems: Int = DEFAULT_BATCH_SIZE,
     ): List<MediaItem> {
         val seedArtistIds = seed?.orderedArtists?.map { it.id }?.toSet().orEmpty()
@@ -35,7 +38,8 @@ internal object EchoBrainQueuePlanner {
             .filter { candidate ->
                 candidate.id.isNotBlank() &&
                     candidate.id !in queuedIds &&
-                    candidate.id !in previouslyInjectedIds
+                    candidate.id !in previouslyInjectedIds &&
+                    canonicalSongKey(candidate) !in blockedSongKeys
             }
             .distinctBy { it.id }
             .sortedWith(
@@ -47,6 +51,7 @@ internal object EchoBrainQueuePlanner {
                     )
                 }.thenBy { it.id },
             )
+            .distinctBy(::canonicalSongKey)
             .take(maxItems)
             .map(Song::toMediaItem)
             .toList()
@@ -61,6 +66,7 @@ internal object EchoBrainQueuePlanner {
         candidates: List<MediaItem>,
         queuedIds: Set<String>,
         previouslyInjectedIds: Set<String>,
+        blockedSongKeys: Set<String> = emptySet(),
         maxItems: Int = DEFAULT_BATCH_SIZE,
     ): List<MediaItem> =
         candidates
@@ -68,11 +74,57 @@ internal object EchoBrainQueuePlanner {
             .filter { candidate ->
                 candidate.mediaId.isNotBlank() &&
                     candidate.mediaId !in queuedIds &&
-                    candidate.mediaId !in previouslyInjectedIds
+                    candidate.mediaId !in previouslyInjectedIds &&
+                    canonicalSongKey(candidate) !in blockedSongKeys
             }
-            .distinctBy(MediaItem::mediaId)
+            .distinctBy(::canonicalSongKey)
             .take(maxItems)
             .toList()
+
+    /**
+     * A YouTube mix can expose the same recording under distinct queue or video identifiers.
+     * This key folds title and artists so Echo Brain never inserts a visible duplicate already
+     * present in the listener's original mix.
+     */
+    fun canonicalSongKeys(items: Iterable<MediaItem>): Set<String> =
+        items.mapTo(mutableSetOf(), ::canonicalSongKey)
+
+    private fun canonicalSongKey(song: Song): String =
+        canonicalSongKey(
+            title = song.song.title,
+            artistNames = song.orderedArtists.map { it.name },
+            fallbackId = song.id,
+        )
+
+    private fun canonicalSongKey(mediaItem: MediaItem): String {
+        val metadata = mediaItem.metadata
+        return canonicalSongKey(
+            title = metadata?.title ?: mediaItem.mediaMetadata.title?.toString().orEmpty(),
+            artistNames = metadata?.artists?.map { it.name }
+                ?: listOfNotNull(mediaItem.mediaMetadata.artist?.toString()),
+            fallbackId = mediaItem.mediaId,
+        )
+    }
+
+    private fun canonicalSongKey(
+        title: String,
+        artistNames: List<String>,
+        fallbackId: String,
+    ): String {
+        val normalizedTitle = normalize(title)
+        val normalizedArtists = artistNames.map(::normalize).filter(String::isNotBlank).sorted()
+        return if (normalizedTitle.isBlank() && normalizedArtists.isEmpty()) {
+            "id:${normalize(fallbackId)}"
+        } else {
+            "$normalizedTitle|${normalizedArtists.joinToString(",")}"
+        }
+    }
+
+    private fun normalize(value: String): String =
+        Normalizer.normalize(value, Normalizer.Form.NFD)
+            .replace("\\p{M}+".toRegex(), "")
+            .lowercase()
+            .filter(Char::isLetterOrDigit)
 
     /**
      * Starts Echo Brain for a fresh mix, retries a mix that has not received recommendations near

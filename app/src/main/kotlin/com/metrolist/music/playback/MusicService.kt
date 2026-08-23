@@ -504,6 +504,7 @@ class MusicService :
     private val echoBrainProcessedSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInFlightSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInjectedItemIds = Collections.synchronizedSet(mutableSetOf<String>())
+    private val echoBrainInjectedSongKeys = Collections.synchronizedSet(mutableSetOf<String>())
 
     // URL cache for stream URLs - class-level so it can be invalidated on errors
     private val songUrlCache = StreamUrlCache()
@@ -1797,6 +1798,7 @@ class MusicService :
         echoBrainProcessedSeedIds.clear()
         echoBrainInFlightSeedIds.clear()
         echoBrainInjectedItemIds.clear()
+        echoBrainInjectedSongKeys.clear()
         val persistShuffleAcrossQueues = dataStore.get(PersistentShuffleAcrossQueuesKey, false)
         if (!persistShuffleAcrossQueues && !restoringQueue) {
             player.shuffleModeEnabled = false
@@ -2317,7 +2319,10 @@ class MusicService :
 
         scope.launch(SilentHandler) {
             try {
-                val queuedIds = player.mediaItems.mapTo(mutableSetOf()) { it.mediaId }
+                val queuedItems = player.mediaItems
+                val queuedIds = queuedItems.mapTo(mutableSetOf()) { it.mediaId }
+                val blockedSongKeys =
+                    EchoBrainQueuePlanner.canonicalSongKeys(queuedItems) + echoBrainInjectedSongKeys
                 val relatedSongs = withContext(Dispatchers.IO) {
                     loadEchoBrainRelatedSongs(
                         seedMediaId = seedMediaId,
@@ -2334,6 +2339,7 @@ class MusicService :
                         relatedSongs = relatedSongs,
                         queuedIds = queuedIds,
                         previouslyInjectedIds = echoBrainInjectedItemIds,
+                        blockedSongKeys = blockedSongKeys,
                     )
                 val recommendations =
                     if (localRecommendations.isNotEmpty()) {
@@ -2343,6 +2349,7 @@ class MusicService :
                             loadEchoBrainRadioRecommendations(
                                 seedMediaId = seedMediaId,
                                 excludedIds = queuedIds + echoBrainInjectedItemIds,
+                                blockedSongKeys = blockedSongKeys,
                             )
                         }
                     }
@@ -2356,6 +2363,7 @@ class MusicService :
                 player.addMediaItems(insertIndex, taggedRecommendations)
                 player.prepare()
                 echoBrainInjectedItemIds.addAll(taggedRecommendations.map { it.mediaId })
+                echoBrainInjectedSongKeys.addAll(EchoBrainQueuePlanner.canonicalSongKeys(taggedRecommendations))
                 echoBrainProcessedSeedIds.add(seedMediaId)
 
                 if (player.shuffleModeEnabled) {
@@ -2384,6 +2392,7 @@ class MusicService :
     private suspend fun loadEchoBrainRadioRecommendations(
         seedMediaId: String,
         excludedIds: Set<String>,
+        blockedSongKeys: Set<String>,
     ): List<MediaItem> =
         runCatching {
             val radioQueue =
@@ -2399,6 +2408,7 @@ class MusicService :
                 candidates = initialItems,
                 queuedIds = excludedIds,
                 previouslyInjectedIds = emptySet(),
+                blockedSongKeys = blockedSongKeys,
             )
             if (initialSelection.isNotEmpty() || !radioQueue.hasNextPage()) {
                 initialSelection
@@ -2409,6 +2419,7 @@ class MusicService :
                         .filterVideoSongs(cachedHideVideoSongs),
                     queuedIds = excludedIds,
                     previouslyInjectedIds = emptySet(),
+                    blockedSongKeys = blockedSongKeys,
                 )
             }
         }.onFailure { error ->
