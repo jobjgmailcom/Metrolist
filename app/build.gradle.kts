@@ -273,6 +273,12 @@ android {
 }
 
 val protocVersion = libs.versions.protobuf.get()
+val protocRepositoryUrl =
+    providers
+        .gradleProperty("protocRepositoryUrl")
+        .orElse("https://repo.maven.apache.org/maven2")
+        .get()
+        .trimEnd('/')
 
 fun getProtocUrl(): String {
     val os = System.getProperty("os.name").lowercase()
@@ -292,7 +298,7 @@ fun getProtocUrl(): String {
         else -> "x86_64"
     }
 
-    return "https://repo1.maven.org/maven2/com/google/protobuf/protoc/$protocVersion/protoc-$protocVersion-$osName-$archName.exe"
+    return "$protocRepositoryUrl/com/google/protobuf/protoc/$protocVersion/protoc-$protocVersion-$osName-$archName.exe"
 }
 
 val protoDir = rootProject.file("metroproto")
