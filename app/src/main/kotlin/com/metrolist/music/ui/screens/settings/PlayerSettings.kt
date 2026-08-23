@@ -50,6 +50,7 @@ import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.constants.AutoSkipNextOnErrorKey
 import com.metrolist.music.constants.AutoplayKey
 import com.metrolist.music.constants.DisableLoadMoreWhenRepeatAllKey
+import com.metrolist.music.constants.EchoBrainEnabledKey
 import com.metrolist.music.constants.EnableGoogleCastKey
 import com.metrolist.music.constants.HistoryDuration
 import com.metrolist.music.constants.KeepScreenOn
@@ -164,6 +165,10 @@ fun PlayerSettings(
     )
     val (autoRadioQueue, onAutoRadioQueueChange) = rememberPreference(
         AutoRadioQueueKey,
+        defaultValue = true
+    )
+    val (echoBrainEnabled, onEchoBrainEnabledChange) = rememberPreference(
+        EchoBrainEnabledKey,
         defaultValue = true
     )
     val (disableLoadMoreWhenRepeatAll, onDisableLoadMoreWhenRepeatAllChange) = rememberPreference(
@@ -808,6 +813,27 @@ fun PlayerSettings(
                         )
                     },
                     onClick = { onAutoRadioQueueChange(!autoRadioQueue) }
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.radio),
+                    title = { Text(stringResource(R.string.echo_brain)) },
+                    description = { Text(stringResource(R.string.echo_brain_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = echoBrainEnabled,
+                            onCheckedChange = onEchoBrainEnabledChange,
+                            thumbContent = {
+                                Icon(
+                                    painter = painterResource(
+                                        id = if (echoBrainEnabled) R.drawable.check else R.drawable.close
+                                    ),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(SwitchDefaults.IconSize)
+                                )
+                            }
+                        )
+                    },
+                    onClick = { onEchoBrainEnabledChange(!echoBrainEnabled) }
                 ),
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.skip_next),
