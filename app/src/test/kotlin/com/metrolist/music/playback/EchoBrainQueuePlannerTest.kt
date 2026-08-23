@@ -1,5 +1,6 @@
 package com.metrolist.music.playback
 
+import androidx.media3.common.MediaItem
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.db.entities.SongEntity
 import org.junit.Assert.assertEquals
@@ -65,6 +66,24 @@ class EchoBrainQueuePlannerTest {
         assertEquals(listOf("fresh"), selected.map { it.mediaId })
     }
 
+    @Test
+    fun `radio fallback selects new tracks when all local queue entries are occupied`() {
+        val selected = EchoBrainQueuePlanner.selectRadioItems(
+            candidates = listOf(
+                mediaItem("active"),
+                mediaItem("already-in-mix"),
+                mediaItem("radio-first"),
+                mediaItem("radio-second"),
+                mediaItem("radio-first"),
+            ),
+            queuedIds = setOf("active", "already-in-mix"),
+            previouslyInjectedIds = emptySet(),
+            maxItems = 3,
+        )
+
+        assertEquals(listOf("radio-first", "radio-second"), selected.map { it.mediaId })
+    }
+
     private fun song(
         id: String,
         liked: Boolean = false,
@@ -79,4 +98,7 @@ class EchoBrainQueuePlannerTest {
             ),
             artists = emptyList(),
         )
+
+    private fun mediaItem(id: String): MediaItem =
+        MediaItem.Builder().setMediaId(id).build()
 }

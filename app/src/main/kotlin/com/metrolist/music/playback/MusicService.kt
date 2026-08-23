@@ -2323,21 +2323,34 @@ class MusicService :
             if (player.currentMediaItem?.mediaId != seedMediaId) return@launch
 
             val seedSong = withContext(Dispatchers.IO) { database.getSongById(seedMediaId) }
-            val recommendations = EchoBrainQueuePlanner.select(
-                seed = seedSong,
-                relatedSongs = relatedSongs,
-                queuedIds = queuedIds,
-                previouslyInjectedIds = echoBrainInjectedItemIds,
-            )
+            val localRecommendations =
+                EchoBrainQueuePlanner.select(
+                    seed = seedSong,
+                    relatedSongs = relatedSongs,
+                    queuedIds = queuedIds,
+                    previouslyInjectedIds = echoBrainInjectedItemIds,
+                )
+            val recommendations =
+                if (localRecommendations.isNotEmpty()) {
+                    localRecommendations
+                } else {
+                    withContext(Dispatchers.IO) {
+                        loadEchoBrainRadioRecommendations(
+                            seedMediaId = seedMediaId,
+                            excludedIds = queuedIds + echoBrainInjectedItemIds,
+                        )
+                    }
+                }
             if (recommendations.isEmpty()) {
-                Timber.tag(TAG).d("Echo Brain found no new related songs for %s", seedMediaId)
+                Timber.tag(TAG).w("Echo Brain found no new recommendations for %s", seedMediaId)
                 return@launch
             }
 
             val insertIndex = player.currentMediaItemIndex + 1
-            player.addMediaItems(insertIndex, recommendations)
+            val taggedRecommendations = recommendations.map(::markEchoBrainRecommendation)
+            player.addMediaItems(insertIndex, taggedRecommendations)
             player.prepare()
-            echoBrainInjectedItemIds.addAll(recommendations.map { it.mediaId })
+            echoBrainInjectedItemIds.addAll(taggedRecommendations.map { it.mediaId })
 
             if (player.shuffleModeEnabled) {
                 applyShuffleOrder(
@@ -2347,11 +2360,46 @@ class MusicService :
                 )
             }
             Timber.tag(TAG).i(
-                "Echo Brain inserted %d songs after %s without replacing the queue",
-                recommendations.size,
+                "Echo Brain inserted %d tagged songs after %s without replacing the queue",
+                taggedRecommendations.size,
                 seedMediaId,
             )
         }
+    }
+
+    /**
+     * Uses the same resilient radio queue that powers the working Radio action. This is only a
+     * fallback: locally ranked relations remain the first choice, while a populated mix can still
+     * receive recommendations if its local graph has no available songs.
+     */
+    private suspend fun loadEchoBrainRadioRecommendations(
+        seedMediaId: String,
+        excludedIds: Set<String>,
+    ): List<MediaItem> =
+        runCatching {
+            val radioItems =
+                YouTubeQueue(
+                    endpoint = WatchEndpoint(videoId = seedMediaId),
+                ).getInitialStatus()
+                    .items
+                    .filterExplicit(cachedHideExplicit)
+                    .filterVideoSongs(cachedHideVideoSongs)
+            EchoBrainQueuePlanner.selectRadioItems(
+                candidates = radioItems,
+                queuedIds = excludedIds,
+                previouslyInjectedIds = emptySet(),
+            )
+        }.onFailure { error ->
+            Timber.tag(TAG).w(error, "Echo Brain radio fallback failed for %s", seedMediaId)
+        }.getOrDefault(emptyList())
+
+    /**
+     * Queue rows render MediaMetadata.suggestedBy, making actual Echo Brain additions visible
+     * rather than indistinguishable from the user's original mix.
+     */
+    private fun markEchoBrainRecommendation(mediaItem: MediaItem): MediaItem {
+        val metadata = mediaItem.metadata ?: return mediaItem
+        return metadata.copy(suggestedBy = getString(R.string.echo_brain)).toMediaItem()
     }
 
     /**
