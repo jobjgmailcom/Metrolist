@@ -99,6 +99,12 @@ fun SettingsScreen(
                 ),
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.radio),
+                    title = { Text(stringResource(R.string.echo_brain)) },
+                    description = { Text(stringResource(R.string.echo_brain_desc)) },
+                    onClick = { navController.navigate("settings/echo_brain") }
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.radio),
                     title = { Text(stringResource(R.string.stream_sources)) },
                     onClick = { navController.navigate("settings/stream_sources") }
                 ),
