@@ -503,6 +503,7 @@ class MusicService :
     @Volatile
     private var cachedEchoBrainEnabled = true
     private val echoBrainProcessedSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
+    private val echoBrainInFlightSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInjectedItemIds = Collections.synchronizedSet(mutableSetOf<String>())
 
     // URL cache for stream URLs - class-level so it can be invalidated on errors
@@ -1784,6 +1785,7 @@ class MusicService :
         currentQueue = queue
         queueTitle = null
         echoBrainProcessedSeedIds.clear()
+        echoBrainInFlightSeedIds.clear()
         echoBrainInjectedItemIds.clear()
         val persistShuffleAcrossQueues = dataStore.get(PersistentShuffleAcrossQueuesKey, false)
         if (!persistShuffleAcrossQueues && !restoringQueue) {
@@ -2308,62 +2310,68 @@ class MusicService :
         force: Boolean = false,
     ) {
         if (!cachedEchoBrainEnabled) return
-        if (!force && !echoBrainProcessedSeedIds.add(seedMediaId)) return
-        echoBrainProcessedSeedIds.add(seedMediaId)
+        if (!force && seedMediaId in echoBrainInjectedItemIds) return
+        if (!force && seedMediaId in echoBrainProcessedSeedIds) return
+        if (!echoBrainInFlightSeedIds.add(seedMediaId)) return
 
         scope.launch(SilentHandler) {
-            val queuedIds = player.mediaItems.mapTo(mutableSetOf()) { it.mediaId }
-            val relatedSongs = withContext(Dispatchers.IO) {
-                loadEchoBrainRelatedSongs(
-                    seedMediaId = seedMediaId,
-                    excludedIds = queuedIds + echoBrainInjectedItemIds,
-                )
-            }
-            if (!cachedEchoBrainEnabled || relatedSongs.isEmpty()) return@launch
-            if (player.currentMediaItem?.mediaId != seedMediaId) return@launch
-
-            val seedSong = withContext(Dispatchers.IO) { database.getSongById(seedMediaId) }
-            val localRecommendations =
-                EchoBrainQueuePlanner.select(
-                    seed = seedSong,
-                    relatedSongs = relatedSongs,
-                    queuedIds = queuedIds,
-                    previouslyInjectedIds = echoBrainInjectedItemIds,
-                )
-            val recommendations =
-                if (localRecommendations.isNotEmpty()) {
-                    localRecommendations
-                } else {
-                    withContext(Dispatchers.IO) {
-                        loadEchoBrainRadioRecommendations(
-                            seedMediaId = seedMediaId,
-                            excludedIds = queuedIds + echoBrainInjectedItemIds,
-                        )
-                    }
+            try {
+                val queuedIds = player.mediaItems.mapTo(mutableSetOf()) { it.mediaId }
+                val relatedSongs = withContext(Dispatchers.IO) {
+                    loadEchoBrainRelatedSongs(
+                        seedMediaId = seedMediaId,
+                        excludedIds = queuedIds + echoBrainInjectedItemIds,
+                    )
                 }
-            if (recommendations.isEmpty()) {
-                Timber.tag(TAG).w("Echo Brain found no new recommendations for %s", seedMediaId)
-                return@launch
-            }
+                if (!cachedEchoBrainEnabled) return@launch
+                if (player.currentMediaItem?.mediaId != seedMediaId) return@launch
 
-            val insertIndex = player.currentMediaItemIndex + 1
-            val taggedRecommendations = recommendations.map(::markEchoBrainRecommendation)
-            player.addMediaItems(insertIndex, taggedRecommendations)
-            player.prepare()
-            echoBrainInjectedItemIds.addAll(taggedRecommendations.map { it.mediaId })
+                val seedSong = withContext(Dispatchers.IO) { database.getSongById(seedMediaId) }
+                val localRecommendations =
+                    EchoBrainQueuePlanner.select(
+                        seed = seedSong,
+                        relatedSongs = relatedSongs,
+                        queuedIds = queuedIds,
+                        previouslyInjectedIds = echoBrainInjectedItemIds,
+                    )
+                val recommendations =
+                    if (localRecommendations.isNotEmpty()) {
+                        localRecommendations
+                    } else {
+                        withContext(Dispatchers.IO) {
+                            loadEchoBrainRadioRecommendations(
+                                seedMediaId = seedMediaId,
+                                excludedIds = queuedIds + echoBrainInjectedItemIds,
+                            )
+                        }
+                    }
+                if (recommendations.isEmpty()) {
+                    Timber.tag(TAG).w("Echo Brain found no new recommendations for %s; it will retry automatically", seedMediaId)
+                    return@launch
+                }
 
-            if (player.shuffleModeEnabled) {
-                applyShuffleOrder(
-                    player.currentMediaItemIndex,
-                    player.mediaItemCount,
-                    cachedShufflePlaylistFirst,
+                val insertIndex = player.currentMediaItemIndex + 1
+                val taggedRecommendations = recommendations.map(::markEchoBrainRecommendation)
+                player.addMediaItems(insertIndex, taggedRecommendations)
+                player.prepare()
+                echoBrainInjectedItemIds.addAll(taggedRecommendations.map { it.mediaId })
+                echoBrainProcessedSeedIds.add(seedMediaId)
+
+                if (player.shuffleModeEnabled) {
+                    applyShuffleOrder(
+                        player.currentMediaItemIndex,
+                        player.mediaItemCount,
+                        cachedShufflePlaylistFirst,
+                    )
+                }
+                Timber.tag(TAG).i(
+                    "Echo Brain inserted %d tagged songs after %s without replacing the queue",
+                    taggedRecommendations.size,
+                    seedMediaId,
                 )
+            } finally {
+                echoBrainInFlightSeedIds.remove(seedMediaId)
             }
-            Timber.tag(TAG).i(
-                "Echo Brain inserted %d tagged songs after %s without replacing the queue",
-                taggedRecommendations.size,
-                seedMediaId,
-            )
         }
     }
 
@@ -2377,18 +2385,31 @@ class MusicService :
         excludedIds: Set<String>,
     ): List<MediaItem> =
         runCatching {
-            val radioItems =
+            val radioQueue =
                 YouTubeQueue(
                     endpoint = WatchEndpoint(videoId = seedMediaId),
-                ).getInitialStatus()
+                )
+            val initialItems =
+                radioQueue.getInitialStatus()
                     .items
                     .filterExplicit(cachedHideExplicit)
                     .filterVideoSongs(cachedHideVideoSongs)
-            EchoBrainQueuePlanner.selectRadioItems(
-                candidates = radioItems,
+            val initialSelection = EchoBrainQueuePlanner.selectRadioItems(
+                candidates = initialItems,
                 queuedIds = excludedIds,
                 previouslyInjectedIds = emptySet(),
             )
+            if (initialSelection.isNotEmpty() || !radioQueue.hasNextPage()) {
+                initialSelection
+            } else {
+                EchoBrainQueuePlanner.selectRadioItems(
+                    candidates = radioQueue.nextPage()
+                        .filterExplicit(cachedHideExplicit)
+                        .filterVideoSongs(cachedHideVideoSongs),
+                    queuedIds = excludedIds,
+                    previouslyInjectedIds = emptySet(),
+                )
+            }
         }.onFailure { error ->
             Timber.tag(TAG).w(error, "Echo Brain radio fallback failed for %s", seedMediaId)
         }.getOrDefault(emptyList())
@@ -2708,7 +2729,11 @@ class MusicService :
 
         if (cachedEchoBrainEnabled &&
             reason != Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT &&
-            mediaItem?.metadata?.isEpisode != true
+            mediaItem?.metadata?.isEpisode != true &&
+            EchoBrainQueuePlanner.shouldAutoInject(
+                currentIndex = player.currentMediaItemIndex,
+                mediaItemCount = player.mediaItemCount,
+            )
         ) {
             mediaItem?.mediaId?.takeIf { it.isNotBlank() }?.let(::injectEchoBrainRecommendations)
         }

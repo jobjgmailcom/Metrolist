@@ -84,6 +84,13 @@ class EchoBrainQueuePlannerTest {
         assertEquals(listOf("radio-first", "radio-second"), selected.map { it.mediaId })
     }
 
+    @Test
+    fun `automatic injection runs at queue start and before the original queue ends`() {
+        assertEquals(true, EchoBrainQueuePlanner.shouldAutoInject(currentIndex = 0, mediaItemCount = 50))
+        assertEquals(false, EchoBrainQueuePlanner.shouldAutoInject(currentIndex = 12, mediaItemCount = 50))
+        assertEquals(true, EchoBrainQueuePlanner.shouldAutoInject(currentIndex = 39, mediaItemCount = 50))
+    }
+
     private fun song(
         id: String,
         liked: Boolean = false,
