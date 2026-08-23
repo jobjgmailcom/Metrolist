@@ -1841,6 +1841,10 @@ class MusicService :
                 val shufflePlaylistFirst = dataStore.get(ShufflePlaylistFirstKey, false)
                 applyShuffleOrder(player.currentMediaItemIndex, player.mediaItemCount, shufflePlaylistFirst)
             }
+
+            player.currentMediaItem?.mediaId
+                ?.takeIf { cachedEchoBrainEnabled && it.isNotBlank() }
+                ?.let(::injectEchoBrainRecommendations)
         }
     }
 
@@ -2293,17 +2297,31 @@ class MusicService :
      * session guard prevents recommendation items from recursively expanding the queue while a
      * user is listening to the injected batch.
      */
-    private fun injectEchoBrainRecommendations(seedMediaId: String) {
-        if (!cachedEchoBrainEnabled || !echoBrainProcessedSeedIds.add(seedMediaId)) return
+    fun injectEchoBrainNow() {
+        player.currentMediaItem?.mediaId
+            ?.takeIf { it.isNotBlank() }
+            ?.let { injectEchoBrainRecommendations(it, force = true) }
+    }
+
+    private fun injectEchoBrainRecommendations(
+        seedMediaId: String,
+        force: Boolean = false,
+    ) {
+        if (!cachedEchoBrainEnabled) return
+        if (!force && !echoBrainProcessedSeedIds.add(seedMediaId)) return
+        echoBrainProcessedSeedIds.add(seedMediaId)
 
         scope.launch(SilentHandler) {
+            val queuedIds = player.mediaItems.mapTo(mutableSetOf()) { it.mediaId }
             val relatedSongs = withContext(Dispatchers.IO) {
-                loadEchoBrainRelatedSongs(seedMediaId)
+                loadEchoBrainRelatedSongs(
+                    seedMediaId = seedMediaId,
+                    excludedIds = queuedIds + echoBrainInjectedItemIds,
+                )
             }
             if (!cachedEchoBrainEnabled || relatedSongs.isEmpty()) return@launch
             if (player.currentMediaItem?.mediaId != seedMediaId) return@launch
 
-            val queuedIds = player.mediaItems.mapTo(mutableSetOf()) { it.mediaId }
             val seedSong = withContext(Dispatchers.IO) { database.getSongById(seedMediaId) }
             val recommendations = EchoBrainQueuePlanner.select(
                 seed = seedSong,
@@ -2340,9 +2358,12 @@ class MusicService :
      * Uses MetroList's persisted related-song graph first. If playback has not populated it yet,
      * obtain one related page and store the resulting relationships through the existing DAO.
      */
-    private suspend fun loadEchoBrainRelatedSongs(seedMediaId: String): List<Song> {
+    private suspend fun loadEchoBrainRelatedSongs(
+        seedMediaId: String,
+        excludedIds: Set<String>,
+    ): List<Song> {
         val cachedSongs = database.relatedSongs(seedMediaId)
-        if (cachedSongs.isNotEmpty()) return cachedSongs
+        if (cachedSongs.any { it.id !in excludedIds }) return cachedSongs
 
         val relatedEndpoint =
             YouTube.next(WatchEndpoint(videoId = seedMediaId)).getOrNull()?.relatedEndpoint

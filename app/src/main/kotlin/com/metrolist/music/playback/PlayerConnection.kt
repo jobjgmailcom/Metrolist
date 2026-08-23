@@ -285,6 +285,19 @@ class PlayerConnection(
         }
     }
 
+    fun injectEchoBrainNow() {
+        if (shouldBlockPlaybackChanges?.invoke() == true) {
+            Timber.tag("PlayerConnection").d("injectEchoBrainNow blocked - Listen Together guest")
+            return
+        }
+        try {
+            service.injectEchoBrainNow()
+        } catch (e: Exception) {
+            Timber.tag(TAG).e(e, "Error in injectEchoBrainNow")
+            throw e
+        }
+    }
+
     fun playNext(item: MediaItem) = playNext(listOf(item))
 
     fun playNext(items: List<MediaItem>) {
