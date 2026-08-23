@@ -1,0 +1,131 @@
+name: MetroList Echo Brain FOSS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metrolist-echo-brain-foss-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-build:
+    name: Verify MetroList Echo Brain FOSS and build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=false -Dorg.gradle.workers.max=1 -Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1024m -XX:+UseParallelGC -Dfile.encoding=UTF-8
+      METROLIST_APPLICATION_ID: com.metrolist.music.echobrain
+      METROLIST_APP_NAME: MetroList Echo Brain FOSS
+
+    steps:
+      - name: Check out source and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up Temurin JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      - name: Set up Android SDK command-line tools
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 37 build components
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+
+      - name: Configure stable FOSS build resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >> gradle.properties <<'EOF'
+          # CI-only safeguards: one worker and no persistent Gradle daemon.
+          org.gradle.daemon=false
+          org.gradle.parallel=false
+          org.gradle.workers.max=1
+          org.gradle.unsafe.configuration-cache=false
+          org.gradle.jvmargs=-Xmx3072M -XX:MaxMetaspaceSize=1024M -Dkotlin.daemon.jvm.options="-Xmx2048M" -XX:+UseParallelGC -Dfile.encoding=UTF-8
+          org.gradle.java.installations.fromEnv=JAVA_HOME
+          EOF
+          chmod +x gradlew
+
+      - name: Create ephemeral debug keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          keytool -genkeypair -noprompt \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
+
+      - name: Show toolchain versions
+        run: |
+          java --version
+          ./gradlew --version --no-daemon
+
+      - name: Test MetroList Echo Brain FOSS
+        run: ./gradlew :app:testFossDebugUnitTest --no-daemon --max-workers=1 --stacktrace --console=plain
+
+      - name: Compile FOSS debug APK
+        run: ./gradlew :app:assembleFossDebug --no-daemon --max-workers=1 --stacktrace --console=plain
+
+      - name: Verify FOSS APK and write checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk/foss/debug -type f -name '*foss*debug.apk' -print -quit)"
+          test -n "$apk"
+          build_tools="$ANDROID_HOME/build-tools/37.0.0"
+          "$build_tools/apksigner" verify --verbose "$apk"
+          "$build_tools/aapt" dump xmltree "$apk" AndroidManifest.xml > manifest.txt
+          unzip -Z1 "$apk" > entries.txt
+          unzip -p "$apk" 'classes*.dex' > classes.dex.concat
+          if grep -aEq 'L(com/google/android/gms|com/google/firebase|androidx/media3/cast)/' classes.dex.concat; then
+            echo 'FOSS validation failed: proprietary DEX descriptors detected.' >&2
+            exit 1
+          fi
+          if grep -Eqi 'com\.google\.android\.gms|com\.google\.firebase|androidx\.media3\.cast' manifest.txt; then
+            echo 'FOSS validation failed: proprietary manifest metadata detected.' >&2
+            exit 1
+          fi
+          if grep -Eq '(^|/)(com/google/android/gms|com/google/firebase|androidx/media3/cast)(/|$)' entries.txt; then
+            echo 'FOSS validation failed: proprietary APK paths detected.' >&2
+            exit 1
+          fi
+          sha256sum "$apk" | tee "${apk}.sha256"
+
+      - name: Upload universal FOSS debug APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: MetroList-Echo-Brain-FOSS-debug
+          path: |
+            app/build/outputs/apk/foss/debug/*foss*debug.apk
+            app/build/outputs/apk/foss/debug/*foss*debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14

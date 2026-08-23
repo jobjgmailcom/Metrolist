@@ -206,6 +206,8 @@
 
     <string name="auto_radio_queue">Auto radio queue</string>
     <string name="auto_radio_queue_desc">Automatically create a radio queue when playing a song from search or home</string>
+    <string name="echo_brain">Echo Brain</string>
+    <string name="echo_brain_desc">Insert locally ranked related songs immediately after the active track without replacing your queue</string>
     <string name="enable_similar_content">Enable similar content</string>
     <string name="similar_content_desc">Automatically adds more similar songs when the end of the queue is reached</string>
     <string name="persistent_shuffle_title">Persistent shuffle</string>

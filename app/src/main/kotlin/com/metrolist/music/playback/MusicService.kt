@@ -119,6 +119,7 @@ import com.metrolist.music.constants.CrossfadeDurationKey
 import com.metrolist.music.constants.CrossfadeEnabledKey
 import com.metrolist.music.constants.CrossfadeGaplessKey
 import com.metrolist.music.constants.DisableLoadMoreWhenRepeatAllKey
+import com.metrolist.music.constants.EchoBrainEnabledKey
 import com.metrolist.music.constants.DiscordActivityNameKey
 import com.metrolist.music.constants.DiscordActivityTypeKey
 import com.metrolist.music.constants.DiscordAdvancedModeKey
@@ -499,6 +500,10 @@ class MusicService :
     private var cachedShufflePlaylistFirst = false
     @Volatile
     private var cachedAutoLoadMore = true
+    @Volatile
+    private var cachedEchoBrainEnabled = true
+    private val echoBrainProcessedSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
+    private val echoBrainInjectedItemIds = Collections.synchronizedSet(mutableSetOf<String>())
 
     // URL cache for stream URLs - class-level so it can be invalidated on errors
     private val songUrlCache = StreamUrlCache()
@@ -1171,6 +1176,9 @@ class MusicService :
         scope.launch {
             dataStore.data.map { it[AutoLoadMoreKey] ?: true }.distinctUntilChanged().collect { cachedAutoLoadMore = it }
         }
+        scope.launch {
+            dataStore.data.map { it[EchoBrainEnabledKey] ?: true }.distinctUntilChanged().collect { cachedEchoBrainEnabled = it }
+        }
         // Keep InnerTubeX extraction in sync with the stream source toggles.
         // Map to the derived set + distinctUntilChanged so an unrelated preference write doesn't
         // rebuild the set and rewrite the @Volatile field on every DataStore emission.
@@ -1775,6 +1783,8 @@ class MusicService :
 
         currentQueue = queue
         queueTitle = null
+        echoBrainProcessedSeedIds.clear()
+        echoBrainInjectedItemIds.clear()
         val persistShuffleAcrossQueues = dataStore.get(PersistentShuffleAcrossQueuesKey, false)
         if (!persistShuffleAcrossQueues && !restoringQueue) {
             player.shuffleModeEnabled = false
@@ -2276,6 +2286,78 @@ class MusicService :
         startRadioSeamlessly()
     }
 
+    /**
+     * Adds a small Echo Brain recommendation batch after the active item.
+     *
+     * Unlike radio, this method intentionally never removes or replaces items. A per-queue
+     * session guard prevents recommendation items from recursively expanding the queue while a
+     * user is listening to the injected batch.
+     */
+    private fun injectEchoBrainRecommendations(seedMediaId: String) {
+        if (!cachedEchoBrainEnabled || !echoBrainProcessedSeedIds.add(seedMediaId)) return
+
+        scope.launch(SilentHandler) {
+            val relatedSongs = withContext(Dispatchers.IO) {
+                loadEchoBrainRelatedSongs(seedMediaId)
+            }
+            if (!cachedEchoBrainEnabled || relatedSongs.isEmpty()) return@launch
+            if (player.currentMediaItem?.mediaId != seedMediaId) return@launch
+
+            val queuedIds = player.mediaItems.mapTo(mutableSetOf()) { it.mediaId }
+            val seedSong = withContext(Dispatchers.IO) { database.getSongById(seedMediaId) }
+            val recommendations = EchoBrainQueuePlanner.select(
+                seed = seedSong,
+                relatedSongs = relatedSongs,
+                queuedIds = queuedIds,
+                previouslyInjectedIds = echoBrainInjectedItemIds,
+            )
+            if (recommendations.isEmpty()) {
+                Timber.tag(TAG).d("Echo Brain found no new related songs for %s", seedMediaId)
+                return@launch
+            }
+
+            val insertIndex = player.currentMediaItemIndex + 1
+            player.addMediaItems(insertIndex, recommendations)
+            player.prepare()
+            echoBrainInjectedItemIds.addAll(recommendations.map { it.mediaId })
+
+            if (player.shuffleModeEnabled) {
+                applyShuffleOrder(
+                    player.currentMediaItemIndex,
+                    player.mediaItemCount,
+                    cachedShufflePlaylistFirst,
+                )
+            }
+            Timber.tag(TAG).i(
+                "Echo Brain inserted %d songs after %s without replacing the queue",
+                recommendations.size,
+                seedMediaId,
+            )
+        }
+    }
+
+    /**
+     * Uses MetroList's persisted related-song graph first. If playback has not populated it yet,
+     * obtain one related page and store the resulting relationships through the existing DAO.
+     */
+    private suspend fun loadEchoBrainRelatedSongs(seedMediaId: String): List<Song> {
+        val cachedSongs = database.relatedSongs(seedMediaId)
+        if (cachedSongs.isNotEmpty()) return cachedSongs
+
+        val relatedEndpoint =
+            YouTube.next(WatchEndpoint(videoId = seedMediaId)).getOrNull()?.relatedEndpoint
+                ?: return emptyList()
+        val relatedPage = YouTube.related(relatedEndpoint).getOrNull() ?: return emptyList()
+        database.query {
+            relatedPage.songs
+                .map(SongItem::toMediaMetadata)
+                .onEach(::insert)
+                .map { RelatedSongMap(songId = seedMediaId, relatedSongId = it.id) }
+                .forEach(::insert)
+        }
+        return database.relatedSongs(seedMediaId)
+    }
+
     private fun seedLoudnessCacheFromPrefs() {
         val prefs = startupPrefs!!
         normalizationEnabledCached = prefs[AudioNormalizationKey] ?: true
@@ -2553,6 +2635,13 @@ class MusicService :
                     castConnectionHandler?.loadMedia(metadata)
                 }
             }
+        }
+
+        if (cachedEchoBrainEnabled &&
+            reason != Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT &&
+            mediaItem?.metadata?.isEpisode != true
+        ) {
+            mediaItem?.mediaId?.takeIf { it.isNotBlank() }?.let(::injectEchoBrainRecommendations)
         }
 
         if (cachedAutoLoadMore &&
