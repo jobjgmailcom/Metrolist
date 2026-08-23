@@ -18,6 +18,7 @@ import com.metrolist.music.extensions.toMediaItem
  */
 internal object EchoBrainQueuePlanner {
     const val DEFAULT_BATCH_SIZE = 3
+    const val AUTO_TRIGGER_REMAINING_ITEMS = 12
 
     fun select(
         seed: Song?,
@@ -72,6 +73,17 @@ internal object EchoBrainQueuePlanner {
             .distinctBy(MediaItem::mediaId)
             .take(maxItems)
             .toList()
+
+    /**
+     * Inject once at the beginning of a newly loaded mix, then refresh only when the listener is
+     * approaching the end. This preserves the original queue while keeping recommendations ready.
+     */
+    fun shouldAutoInject(
+        currentIndex: Int,
+        mediaItemCount: Int,
+    ): Boolean =
+        currentIndex in 0 until mediaItemCount &&
+            (currentIndex == 0 || mediaItemCount - currentIndex <= AUTO_TRIGGER_REMAINING_ITEMS)
 
     private fun score(
         candidate: Song,
