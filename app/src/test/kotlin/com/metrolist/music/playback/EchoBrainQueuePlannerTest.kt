@@ -47,6 +47,24 @@ class EchoBrainQueuePlannerTest {
         assertEquals(listOf("third", "second"), selected.map { it.mediaId })
     }
 
+    @Test
+    fun `select still finds the only new song for a populated mix`() {
+        val active = song(id = "active")
+        val queuedOne = song(id = "queued-one", liked = true)
+        val queuedTwo = song(id = "queued-two", totalPlayTime = 200L)
+        val fresh = song(id = "fresh", liked = true)
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = active,
+            relatedSongs = listOf(queuedOne, queuedTwo, fresh),
+            queuedIds = setOf("active", "queued-one", "queued-two"),
+            previouslyInjectedIds = emptySet(),
+            maxItems = 3,
+        )
+
+        assertEquals(listOf("fresh"), selected.map { it.mediaId })
+    }
+
     private fun song(
         id: String,
         liked: Boolean = false,

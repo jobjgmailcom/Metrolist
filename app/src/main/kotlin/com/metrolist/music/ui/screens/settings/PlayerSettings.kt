@@ -833,7 +833,7 @@ fun PlayerSettings(
                             }
                         )
                     },
-                    onClick = { onEchoBrainEnabledChange(!echoBrainEnabled) }
+                    onClick = { navController.navigate("settings/echo_brain") }
                 ),
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.skip_next),
