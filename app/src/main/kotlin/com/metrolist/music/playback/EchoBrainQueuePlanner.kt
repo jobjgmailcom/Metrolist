@@ -51,6 +51,28 @@ internal object EchoBrainQueuePlanner {
             .toList()
     }
 
+    /**
+     * Keeps the first genuinely new items from MetroList's radio generator. The radio queue is
+     * already resilient to sparse related pages, so it is the fallback when local relations are
+     * empty or completely occupied by the current queue.
+     */
+    fun selectRadioItems(
+        candidates: List<MediaItem>,
+        queuedIds: Set<String>,
+        previouslyInjectedIds: Set<String>,
+        maxItems: Int = DEFAULT_BATCH_SIZE,
+    ): List<MediaItem> =
+        candidates
+            .asSequence()
+            .filter { candidate ->
+                candidate.mediaId.isNotBlank() &&
+                    candidate.mediaId !in queuedIds &&
+                    candidate.mediaId !in previouslyInjectedIds
+            }
+            .distinctBy(MediaItem::mediaId)
+            .take(maxItems)
+            .toList()
+
     private fun score(
         candidate: Song,
         seedArtistIds: Set<String>,
