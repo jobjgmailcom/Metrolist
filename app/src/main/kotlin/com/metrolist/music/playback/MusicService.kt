@@ -1177,7 +1177,15 @@ class MusicService :
             dataStore.data.map { it[AutoLoadMoreKey] ?: true }.distinctUntilChanged().collect { cachedAutoLoadMore = it }
         }
         scope.launch {
-            dataStore.data.map { it[EchoBrainEnabledKey] ?: true }.distinctUntilChanged().collect { cachedEchoBrainEnabled = it }
+            dataStore.data.map { it[EchoBrainEnabledKey] ?: true }.distinctUntilChanged().collect { enabled ->
+                val wasEnabled = cachedEchoBrainEnabled
+                cachedEchoBrainEnabled = enabled
+                if (enabled && !wasEnabled) {
+                    player.currentMediaItem?.mediaId
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let(::injectEchoBrainRecommendations)
+                }
+            }
         }
         // Keep YTPlayerUtils in sync with the stream source toggles (Settings → Stream sources).
         // Map to the derived set + distinctUntilChanged so an unrelated preference write doesn't
@@ -2304,7 +2312,6 @@ class MusicService :
         force: Boolean = false,
     ) {
         if (!cachedEchoBrainEnabled) return
-        if (!force && seedMediaId in echoBrainInjectedItemIds) return
         if (!force && seedMediaId in echoBrainProcessedSeedIds) return
         if (!echoBrainInFlightSeedIds.add(seedMediaId)) return
 
@@ -2721,12 +2728,23 @@ class MusicService :
             }
         }
 
+        val currentIndex = player.currentMediaItemIndex
+        val nextMediaItem =
+            if (currentIndex >= 0 && currentIndex + 1 < player.mediaItemCount) {
+                player.getMediaItemAt(currentIndex + 1)
+            } else {
+                null
+            }
+        val echoBrainLabel = getString(R.string.echo_brain)
         if (cachedEchoBrainEnabled &&
             reason != Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT &&
             mediaItem?.metadata?.isEpisode != true &&
             EchoBrainQueuePlanner.shouldAutoInject(
-                currentIndex = player.currentMediaItemIndex,
+                currentIndex = currentIndex,
                 mediaItemCount = player.mediaItemCount,
+                currentIsEchoBrainRecommendation = mediaItem?.metadata?.suggestedBy == echoBrainLabel,
+                nextIsEchoBrainRecommendation = nextMediaItem?.metadata?.suggestedBy == echoBrainLabel,
+                hasInjectedRecommendations = echoBrainInjectedItemIds.isNotEmpty(),
             )
         ) {
             mediaItem?.mediaId?.takeIf { it.isNotBlank() }?.let(::injectEchoBrainRecommendations)

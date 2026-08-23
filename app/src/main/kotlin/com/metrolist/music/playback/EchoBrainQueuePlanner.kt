@@ -75,15 +75,21 @@ internal object EchoBrainQueuePlanner {
             .toList()
 
     /**
-     * Inject once at the beginning of a newly loaded mix, then refresh only when the listener is
-     * approaching the end. This preserves the original queue while keeping recommendations ready.
+     * Starts Echo Brain for a fresh mix, retries a mix that has not received recommendations near
+     * its end, and refills exactly when playback reaches the last item of an injected batch.
      */
     fun shouldAutoInject(
         currentIndex: Int,
         mediaItemCount: Int,
+        currentIsEchoBrainRecommendation: Boolean,
+        nextIsEchoBrainRecommendation: Boolean,
+        hasInjectedRecommendations: Boolean,
     ): Boolean =
         currentIndex in 0 until mediaItemCount &&
-            (currentIndex == 0 || mediaItemCount - currentIndex <= AUTO_TRIGGER_REMAINING_ITEMS)
+            (currentIndex == 0 ||
+                (currentIsEchoBrainRecommendation && !nextIsEchoBrainRecommendation) ||
+                (!hasInjectedRecommendations &&
+                    mediaItemCount - currentIndex <= AUTO_TRIGGER_REMAINING_ITEMS))
 
     private fun score(
         candidate: Song,
