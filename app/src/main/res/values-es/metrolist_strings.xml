@@ -236,6 +236,12 @@
     <string name="echo_brain_queue_continuity_mix_desc">Mantiene el ritmo de la mezcla original y añade Echo Brain sólo en puntos normales de recarga.</string>
     <string name="echo_brain_queue_continuity_dominant">Echo Brain dominante</string>
     <string name="echo_brain_queue_continuity_dominant_desc">Encadena canciones Echo Brain válidas. Deja pasar sólo una original si ninguna alcanza la similitud elegida y vuelve a intentar después.</string>
+    <string name="echo_brain_reason_local_relation">relación local guardada</string>
+    <string name="echo_brain_reason_artist">artista o colaboración</string>
+    <string name="echo_brain_reason_album">álbum relacionado</string>
+    <string name="echo_brain_reason_co_listen">coescucha local</string>
+    <string name="echo_brain_reason_vault">bóveda de escucha</string>
+    <string name="echo_brain_reason_radio">radio relacionada en caché</string>
     <string name="echo_brain_network">Uso de red para recomendaciones</string>
     <string name="echo_brain_network_local">Modo local (sin red)</string>
     <string name="echo_brain_network_local_desc">Usa únicamente relaciones guardadas en MetroList. No consulta Wi-Fi ni datos móviles.</string>
