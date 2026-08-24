@@ -256,6 +256,13 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `early skip is a session signal only before twenty percent of the active song`() {
+        assertEquals(true, EchoBrainQueuePlanner.isEarlySkip(positionMillis = 11_999L, durationMillis = 60_000L))
+        assertEquals(false, EchoBrainQueuePlanner.isEarlySkip(positionMillis = 12_000L, durationMillis = 60_000L))
+        assertEquals(false, EchoBrainQueuePlanner.isEarlySkip(positionMillis = 5_000L, durationMillis = -1L))
+    }
+
+    @Test
     fun `automatic injection starts a mix and refills when the last Echo Brain item plays`() {
         assertEquals(
             true,

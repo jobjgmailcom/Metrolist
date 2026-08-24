@@ -21,6 +21,16 @@ import java.text.Normalizer
 internal object EchoBrainQueuePlanner {
     const val DEFAULT_BATCH_SIZE = 3
     const val AUTO_TRIGGER_REMAINING_ITEMS = 12
+    const val EARLY_SKIP_PERCENT = 20
+
+    /** A manual transition before this progress is a temporary negative session signal. */
+    fun isEarlySkip(
+        positionMillis: Long,
+        durationMillis: Long,
+    ): Boolean =
+        durationMillis > 0L &&
+            positionMillis >= 0L &&
+            positionMillis * 100L < durationMillis * EARLY_SKIP_PERCENT
 
     fun select(
         seed: Song?,
