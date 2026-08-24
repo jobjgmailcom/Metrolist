@@ -133,6 +133,7 @@ import com.metrolist.music.constants.EchoBrainQueueContinuity
 import com.metrolist.music.constants.EchoBrainQueueContinuityKey
 import com.metrolist.music.constants.EchoBrainRadioRelationCacheKey
 import com.metrolist.music.constants.EchoBrainRecentInjectionHistoryKey
+import com.metrolist.music.constants.EchoBrainSequenceFeedbackKey
 import com.metrolist.music.constants.DiscordActivityNameKey
 import com.metrolist.music.constants.DiscordActivityTypeKey
 import com.metrolist.music.constants.DiscordAdvancedModeKey
@@ -282,6 +283,10 @@ private const val INSTANT_SILENCE_SKIP_SETTLE_MS = 350L
 private const val ECHO_BRAIN_MAXIMUM_BATCH_SIZE = 1
 private const val ECHO_BRAIN_REPEAT_COOLDOWN_MILLIS = 24L * 60L * 60L * 1000L
 private const val ECHO_BRAIN_RADIO_CACHE_MILLIS = 7L * 24L * 60L * 60L * 1000L
+private const val ECHO_BRAIN_SEQUENCE_FEEDBACK_MILLIS = 30L * 24L * 60L * 60L * 1000L
+private const val ECHO_BRAIN_SEQUENCE_FEEDBACK_LIMIT = 128
+private const val ECHO_BRAIN_BALANCED_ARTIST_WINDOW = 8
+private const val ECHO_BRAIN_HIGH_ARTIST_WINDOW = 12
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -548,6 +553,9 @@ class MusicService :
     private val echoBrainRecentArtistKeys = Collections.synchronizedList(mutableListOf<String>())
     private val echoBrainSkippedSongKeys = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainSessionArtistKeys = Collections.synchronizedList(mutableListOf<String>())
+    private val echoBrainSequenceFeedbackLock = Any()
+    private val echoBrainSequenceFeedback = mutableMapOf<String, Pair<Int, Long>>()
+    private val echoBrainInjectedSequenceEdges = Collections.synchronizedMap(mutableMapOf<String, String>())
 
     // URL cache for stream URLs - class-level so it can be invalidated on errors
     private val songUrlCache = StreamUrlCache()
@@ -681,6 +689,7 @@ class MusicService :
         seedLoudnessCacheFromPrefs()
         seedEchoBrainInjectionHistoryFromPrefs()
         seedEchoBrainRadioCacheFromPrefs()
+        seedEchoBrainSequenceFeedbackFromPrefs()
 
         val defaultMediaNotificationProvider =
             DefaultMediaNotificationProvider(
@@ -1881,6 +1890,7 @@ class MusicService :
         echoBrainRecentArtistKeys.clear()
         echoBrainSkippedSongKeys.clear()
         echoBrainSessionArtistKeys.clear()
+        echoBrainInjectedSequenceEdges.clear()
         echoBrainConfirmationMessage?.cancel()
         echoBrainConfirmationMessage = null
         echoBrainConfirmationMediaId = null
@@ -2413,6 +2423,7 @@ class MusicService :
                 val allowNetwork = canUseEchoBrainNetwork()
                 val seedItem = player.currentMediaItem ?: return@launch
                 val blockedArtistKeys = echoBrainBlockedArtistKeys(seedItem)
+                val sequenceFeedbackScores = echoBrainSequenceFeedbackScores(seedItem)
                 val currentIndex = player.currentMediaItemIndex
                 val momentArtistIds =
                     queuedItems
@@ -2445,6 +2456,7 @@ class MusicService :
                         blockedArtistKeys = blockedArtistKeys,
                         momentArtistIds = momentArtistIds,
                         vaultArtistIds = vaultArtistIds,
+                        sequenceFeedbackScores = sequenceFeedbackScores,
                         minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                         allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
                         maxItems = maximumBatchSize,
@@ -2463,6 +2475,7 @@ class MusicService :
                                 seed = seedItem,
                                 momentArtistIds = momentArtistIds,
                                 vaultArtistIds = vaultArtistIds,
+                                sequenceFeedbackScores = sequenceFeedbackScores,
                                 maxItems = maximumBatchSize,
                             )
                         }
@@ -2499,6 +2512,7 @@ class MusicService :
                 echoBrainInjectedItemIds.addAll(taggedRecommendations.map { it.mediaId })
                 echoBrainInjectedSongKeys.addAll(EchoBrainQueuePlanner.canonicalSongKeys(taggedRecommendations))
                 recordEchoBrainArtistKeys(taggedRecommendations)
+                recordEchoBrainSequenceEdges(seedItem, taggedRecommendations)
                 recordEchoBrainInjectionHistory(
                     EchoBrainQueuePlanner.canonicalSongKeys(taggedRecommendations),
                 )
@@ -2541,6 +2555,7 @@ class MusicService :
         seed: MediaItem,
         momentArtistIds: Set<String>,
         vaultArtistIds: Set<String>,
+        sequenceFeedbackScores: Map<String, Int>,
         maxItems: Int,
     ): List<MediaItem> =
         runCatching {
@@ -2562,6 +2577,7 @@ class MusicService :
                 seed = seed,
                 momentArtistIds = momentArtistIds,
                 vaultArtistIds = vaultArtistIds,
+                sequenceFeedbackScores = sequenceFeedbackScores,
                 minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                 allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
                 maxItems = maxItems,
@@ -2580,6 +2596,7 @@ class MusicService :
                     seed = seed,
                     momentArtistIds = momentArtistIds,
                     vaultArtistIds = vaultArtistIds,
+                    sequenceFeedbackScores = sequenceFeedbackScores,
                     minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                     allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
                     maxItems = maxItems,
@@ -2670,9 +2687,10 @@ class MusicService :
         synchronized(echoBrainRecentArtistKeys) {
             val diversityBlockedArtists = when (cachedEchoBrainArtistDiversity) {
                 EchoBrainArtistDiversity.UNLIMITED -> emptySet()
-                EchoBrainArtistDiversity.BALANCED -> echoBrainRecentArtistKeys.takeLast(2).toSet()
+                EchoBrainArtistDiversity.BALANCED ->
+                    echoBrainRecentArtistKeys.takeLast(ECHO_BRAIN_BALANCED_ARTIST_WINDOW).toSet()
                 EchoBrainArtistDiversity.HIGH ->
-                    echoBrainRecentArtistKeys.takeLast(3).toSet() +
+                    echoBrainRecentArtistKeys.takeLast(ECHO_BRAIN_HIGH_ARTIST_WINDOW).toSet() +
                         EchoBrainQueuePlanner.primaryArtistKeys(listOf(seed))
             }
             diversityBlockedArtists + echoBrainSaturatedArtistKeys()
@@ -2694,7 +2712,7 @@ class MusicService :
         if (artistKeys.isEmpty()) return
         synchronized(echoBrainRecentArtistKeys) {
             echoBrainRecentArtistKeys.addAll(artistKeys)
-            while (echoBrainRecentArtistKeys.size > 3) {
+            while (echoBrainRecentArtistKeys.size > ECHO_BRAIN_HIGH_ARTIST_WINDOW) {
                 echoBrainRecentArtistKeys.removeAt(0)
             }
         }
@@ -2852,6 +2870,80 @@ class MusicService :
             JSONObject(echoBrainRecentInjectionTimestamps as Map<*, *>).toString()
         }
         safeDataStoreEdit { prefs -> prefs[EchoBrainRecentInjectionHistoryKey] = serialized }
+    }
+
+    /** Loads fresh local outcomes for an anchor → recommended-song sequence. */
+    private fun seedEchoBrainSequenceFeedbackFromPrefs() {
+        val now = System.currentTimeMillis()
+        val parsed = runCatching {
+            JSONObject(startupPrefs!![EchoBrainSequenceFeedbackKey].orEmpty()).let { json ->
+                buildMap {
+                    val keys = json.keys()
+                    while (keys.hasNext()) {
+                        val edge = keys.next()
+                        val parts = json.optString(edge).split(':', limit = 2)
+                        val score = parts.getOrNull(0)?.toIntOrNull() ?: continue
+                        val updatedAt = parts.getOrNull(1)?.toLongOrNull() ?: continue
+                        if (score != 0 && now - updatedAt < ECHO_BRAIN_SEQUENCE_FEEDBACK_MILLIS) {
+                            put(edge, score to updatedAt)
+                        }
+                    }
+                }
+            }
+        }.getOrDefault(emptyMap())
+        synchronized(echoBrainSequenceFeedbackLock) {
+            echoBrainSequenceFeedback.clear()
+            echoBrainSequenceFeedback.putAll(parsed)
+        }
+    }
+
+    private fun echoBrainSequenceFeedbackScores(seed: MediaItem): Map<String, Int> {
+        val seedKey = EchoBrainQueuePlanner.canonicalSongKeys(listOf(seed)).singleOrNull() ?: return emptyMap()
+        val prefix = "$seedKey\u001F"
+        val now = System.currentTimeMillis()
+        return synchronized(echoBrainSequenceFeedbackLock) {
+            echoBrainSequenceFeedback.entries.removeAll { now - it.value.second >= ECHO_BRAIN_SEQUENCE_FEEDBACK_MILLIS }
+            buildMap<String, Int> {
+                echoBrainSequenceFeedback.forEach { (edge, feedback) ->
+                    if (edge.startsWith(prefix)) {
+                        put(edge.removePrefix(prefix), feedback.first)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun recordEchoBrainSequenceEdges(seed: MediaItem, recommendations: List<MediaItem>) {
+        val seedKey = EchoBrainQueuePlanner.canonicalSongKeys(listOf(seed)).singleOrNull() ?: return
+        recommendations.forEach { recommendation ->
+            val candidateKey = EchoBrainQueuePlanner.canonicalSongKeys(listOf(recommendation)).singleOrNull() ?: return@forEach
+            echoBrainInjectedSequenceEdges[recommendation.mediaId] = "$seedKey\u001F$candidateKey"
+        }
+    }
+
+    private suspend fun recordEchoBrainSequenceOutcome(mediaId: String, delta: Int) {
+        val edge = echoBrainInjectedSequenceEdges.remove(mediaId) ?: return
+        val now = System.currentTimeMillis()
+        val serialized = synchronized(echoBrainSequenceFeedbackLock) {
+            echoBrainSequenceFeedback.entries.removeAll { now - it.value.second >= ECHO_BRAIN_SEQUENCE_FEEDBACK_MILLIS }
+            val previous = echoBrainSequenceFeedback[edge]?.first ?: 0
+            val updatedScore = (previous + delta).coerceIn(-3, 3)
+            if (updatedScore == 0) {
+                echoBrainSequenceFeedback.remove(edge)
+            } else {
+                echoBrainSequenceFeedback[edge] = updatedScore to now
+            }
+            while (echoBrainSequenceFeedback.size > ECHO_BRAIN_SEQUENCE_FEEDBACK_LIMIT) {
+                val oldest = echoBrainSequenceFeedback.minByOrNull { it.value.second }?.key ?: break
+                echoBrainSequenceFeedback.remove(oldest)
+            }
+            JSONObject().apply {
+                echoBrainSequenceFeedback.forEach { (key, feedback) ->
+                    put(key, "${feedback.first}:${feedback.second}")
+                }
+            }.toString()
+        }
+        safeDataStoreEdit { prefs -> prefs[EchoBrainSequenceFeedbackKey] = serialized }
     }
 
     /** Persists only the latest local explanation; it never sends playback data outside the device. */
@@ -3082,7 +3174,10 @@ class MusicService :
         // it gets overwritten below.
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
             lastTransitionedMediaId?.let { previousId ->
-                scope.launch(Dispatchers.IO) { markCachedIfFullyDownloaded(previousId) }
+                scope.launch(Dispatchers.IO) {
+                    markCachedIfFullyDownloaded(previousId)
+                    recordEchoBrainSequenceOutcome(previousId, delta = 1)
+                }
             }
         }
         lastTransitionedMediaId = mediaItem?.mediaId
@@ -5345,6 +5440,9 @@ class MusicService :
             val durationMillis = skippedItem.metadata?.duration?.takeIf { it > 0 }?.times(1000L) ?: -1L
             if (EchoBrainQueuePlanner.isEarlySkip(oldPosition.positionMs, durationMillis)) {
                 echoBrainSkippedSongKeys += EchoBrainQueuePlanner.canonicalSongKeys(listOf(skippedItem))
+                scope.launch(Dispatchers.IO + SilentHandler) {
+                    recordEchoBrainSequenceOutcome(skippedItem.mediaId, delta = -1)
+                }
                 Timber.tag(TAG).i("Echo Brain recorded an early session skip for %s", skippedItem.mediaId)
             }
         }

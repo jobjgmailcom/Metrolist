@@ -161,6 +161,62 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `expanded artist window avoids a four artist circle at every similarity threshold`() {
+        val outsideCircle = song(id = "outside-circle", artistId = "outside")
+        val fourArtistCircle = listOf(
+            song(id = "circle-one", artistId = "artist-one"),
+            song(id = "circle-two", artistId = "artist-two"),
+            song(id = "circle-three", artistId = "artist-three"),
+            song(id = "circle-four", artistId = "artist-four"),
+        )
+        val blockedCircle = setOf("artistone", "artisttwo", "artistthree", "artistfour")
+
+        listOf(90, 80, 70, 60).forEach { threshold ->
+            val selected = EchoBrainQueuePlanner.select(
+                seed = song(id = "seed", artistId = "outside"),
+                relatedSongs = fourArtistCircle + outsideCircle,
+                queuedIds = emptySet(),
+                previouslyInjectedIds = emptySet(),
+                blockedArtistKeys = blockedCircle,
+                minimumSimilarity = threshold,
+                maxItems = 1,
+            )
+
+            assertEquals(listOf("outside-circle"), selected.map { it.mediaId })
+        }
+    }
+
+    @Test
+    fun `sequence feedback prefers a successful valid transition but never bypasses filters`() {
+        val preferred = song(id = "preferred", title = "Preferred", artistId = "preferred-artist")
+        val safeAlternative = song(id = "safe", title = "Safe", artistId = "safe-artist")
+        val feedback = mapOf("preferred|preferredartist" to 2)
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = null,
+            relatedSongs = listOf(safeAlternative, preferred),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            sequenceFeedbackScores = feedback,
+            minimumSimilarity = 60,
+            maxItems = 1,
+        )
+        val selectedWithPreferredArtistBlocked = EchoBrainQueuePlanner.select(
+            seed = null,
+            relatedSongs = listOf(safeAlternative, preferred),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            blockedArtistKeys = setOf("preferredartist"),
+            sequenceFeedbackScores = feedback,
+            minimumSimilarity = 60,
+            maxItems = 1,
+        )
+
+        assertEquals(listOf("preferred"), selected.map { it.mediaId })
+        assertEquals(listOf("safe"), selectedWithPreferredArtistBlocked.map { it.mediaId })
+    }
+
+    @Test
     fun `strict 90 similarity accepts only anchor or reinforced local context`() {
         val seed = song(id = "seed", artistId = "anchor")
         val anchorMatch = song(id = "anchor-match", artistId = "anchor")

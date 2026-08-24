@@ -41,6 +41,7 @@ internal object EchoBrainQueuePlanner {
         blockedArtistKeys: Set<String> = emptySet(),
         momentArtistIds: Set<String> = emptySet(),
         vaultArtistIds: Set<String> = emptySet(),
+        sequenceFeedbackScores: Map<String, Int> = emptyMap(),
         minimumSimilarity: Int = 0,
         allowAlternativeVersions: Boolean = true,
         maxItems: Int = DEFAULT_BATCH_SIZE,
@@ -76,6 +77,7 @@ internal object EchoBrainQueuePlanner {
                         vaultArtistIds,
                     )
                 }
+                    .thenByDescending { sequenceFeedbackScores[canonicalSongKey(it)] ?: 0 }
                     .thenByDescending { score(it, seedArtistIds, seedAlbumId) }
                     .thenBy { it.id },
             )
@@ -99,6 +101,7 @@ internal object EchoBrainQueuePlanner {
         seed: MediaItem? = null,
         momentArtistIds: Set<String> = emptySet(),
         vaultArtistIds: Set<String> = emptySet(),
+        sequenceFeedbackScores: Map<String, Int> = emptyMap(),
         minimumSimilarity: Int = 0,
         allowAlternativeVersions: Boolean = true,
         maxItems: Int = DEFAULT_BATCH_SIZE,
@@ -124,15 +127,17 @@ internal object EchoBrainQueuePlanner {
                         vaultArtistIds,
                     ) >= minimumSimilarity
             }
-            .sortedByDescending {
-                radioSimilarityScore(
-                    it,
-                    seedArtists,
-                    seedAlbum,
-                    momentArtistIds,
-                    vaultArtistIds,
-                )
-            }
+            .sortedWith(
+                compareByDescending<MediaItem> {
+                    radioSimilarityScore(
+                        it,
+                        seedArtists,
+                        seedAlbum,
+                        momentArtistIds,
+                        vaultArtistIds,
+                    )
+                }.thenByDescending { sequenceFeedbackScores[canonicalSongKey(it)] ?: 0 },
+            )
             .distinctBy(::canonicalSongKey)
             .distinctBy(::primaryArtistKey)
             .take(maxItems)
