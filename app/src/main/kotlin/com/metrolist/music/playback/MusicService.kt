@@ -3428,6 +3428,7 @@ class MusicService :
                     mediaId = mediaId,
                     failedStreamClient = failedStreamClient,
                     refreshCipherConfig = false,
+                    failureStatusCode = null,
                     retryReason = "initial buffer stall",
                 )
             }
@@ -3745,7 +3746,7 @@ class MusicService :
 
             isExpiredUrlError(error) -> {
                 Timber.tag(TAG).d("Expired URL (403/410) detected, refreshing stream URL")
-                handleExpiredUrlError(mediaId, failedStreamClient)
+                handleExpiredUrlError(mediaId, failedStreamClient, getHttpResponseCode(error))
                 return
             }
 
@@ -3757,7 +3758,7 @@ class MusicService :
 
             isRemotePlaybackError(error) -> {
                 Timber.tag(TAG).d("Remote playback error detected (${error.errorCode}), refreshing stream URL")
-                handleExpiredUrlError(mediaId, failedStreamClient)
+                handleExpiredUrlError(mediaId, failedStreamClient, getHttpResponseCode(error))
                 return
             }
 
@@ -3976,6 +3977,7 @@ class MusicService :
     private fun handleExpiredUrlError(
         mediaId: String?,
         failedStreamClient: String?,
+        failureStatusCode: Int?,
     ) {
         if (mediaId == null) {
             handleFinalFailure()
@@ -3986,6 +3988,7 @@ class MusicService :
             mediaId = mediaId,
             failedStreamClient = failedStreamClient,
             refreshCipherConfig = true,
+            failureStatusCode = failureStatusCode,
             retryReason = "expired URL error",
         )
     }
@@ -3994,6 +3997,7 @@ class MusicService :
         mediaId: String,
         failedStreamClient: String?,
         refreshCipherConfig: Boolean,
+        failureStatusCode: Int?,
         retryReason: String,
     ) {
         if (hasExceededRetryLimit(mediaId)) {
@@ -4006,9 +4010,10 @@ class MusicService :
         incrementRetryCount(mediaId)
 
         songUrlCache.invalidate(mediaId)
-        if (failedStreamClient == "WEB_REMIX") {
+        if (failedStreamClient?.startsWith("WEB_REMIX@") == true) {
             YTPlayerUtils.markWebRemixFailed(mediaId)
         }
+        YTPlayerUtils.markStreamClientFailed(mediaId, failedStreamClient, failureStatusCode)
         Timber.tag(TAG).d("Cleared cached URL for $mediaId after $retryReason (client=$failedStreamClient)")
 
         try {

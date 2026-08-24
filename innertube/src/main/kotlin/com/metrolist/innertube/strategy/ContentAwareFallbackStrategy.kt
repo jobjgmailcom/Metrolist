@@ -27,9 +27,9 @@ class ContentAwareFallbackStrategy {
         )
 
         val defaultClients = listOf(
-            YouTubeClient.VISIONOS,
             YouTubeClient.ANDROID_VR_1_65_10,
             YouTubeClient.ANDROID_VR_1_43_32,
+            YouTubeClient.VISIONOS,
             YouTubeClient.WEB_REMIX,
             YouTubeClient.TVHTML5,
             YouTubeClient.TVHTML5_SIMPLY,
