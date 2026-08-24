@@ -253,6 +253,12 @@
     <string name="echo_brain_queue_continuity_mix_desc">Keep the original mix pacing and add Echo Brain only at standard refill points.</string>
     <string name="echo_brain_queue_continuity_dominant">Echo Brain dominant</string>
     <string name="echo_brain_queue_continuity_dominant_desc">Chain valid Echo Brain songs. Let only one original song play when no candidate reaches the selected similarity, then retry.</string>
+    <string name="echo_brain_reason_local_relation">saved local relation</string>
+    <string name="echo_brain_reason_artist">artist or collaboration</string>
+    <string name="echo_brain_reason_album">related album</string>
+    <string name="echo_brain_reason_co_listen">local co-listening</string>
+    <string name="echo_brain_reason_vault">listening vault</string>
+    <string name="echo_brain_reason_radio">related radio cache</string>
     <string name="echo_brain_network">Recommendation network use</string>
     <string name="echo_brain_network_local">Local mode (no network)</string>
     <string name="echo_brain_network_local_desc">Uses only relations saved in MetroList. It does not query Wi-Fi or mobile data.</string>

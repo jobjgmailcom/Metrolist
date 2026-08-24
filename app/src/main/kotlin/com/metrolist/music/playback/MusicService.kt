@@ -132,6 +132,7 @@ import com.metrolist.music.constants.EchoBrainNetworkMode
 import com.metrolist.music.constants.EchoBrainNetworkModeKey
 import com.metrolist.music.constants.EchoBrainQueueContinuity
 import com.metrolist.music.constants.EchoBrainQueueContinuityKey
+import com.metrolist.music.constants.EchoBrainRadioRelationCacheKey
 import com.metrolist.music.constants.EchoBrainRecentInjectionHistoryKey
 import com.metrolist.music.constants.DiscordActivityNameKey
 import com.metrolist.music.constants.DiscordActivityTypeKey
@@ -280,6 +281,7 @@ private const val INSTANT_SILENCE_SKIP_STEP_MS = 15_000L
 private const val INSTANT_SILENCE_SKIP_SETTLE_MS = 350L
 private const val ECHO_BRAIN_MAXIMUM_BATCH_SIZE = 1
 private const val ECHO_BRAIN_REPEAT_COOLDOWN_MILLIS = 24L * 60L * 60L * 1000L
+private const val ECHO_BRAIN_RADIO_CACHE_MILLIS = 7L * 24L * 60L * 60L * 1000L
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -537,6 +539,8 @@ class MusicService :
     private var cachedEchoBrainVaultArtistIds: Set<String>? = null
     private val echoBrainInjectionHistoryLock = Any()
     private val echoBrainRecentInjectionTimestamps = mutableMapOf<String, Long>()
+    private val echoBrainRadioCacheLock = Any()
+    private val echoBrainRadioRelationTimestamps = mutableMapOf<String, Long>()
     private val echoBrainProcessedSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInFlightSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInjectedItemIds = Collections.synchronizedSet(mutableSetOf<String>())
@@ -674,6 +678,7 @@ class MusicService :
 
         seedLoudnessCacheFromPrefs()
         seedEchoBrainInjectionHistoryFromPrefs()
+        seedEchoBrainRadioCacheFromPrefs()
 
         val defaultMediaNotificationProvider =
             DefaultMediaNotificationProvider(
@@ -2444,6 +2449,7 @@ class MusicService :
                         allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
                         maxItems = maximumBatchSize,
                     )
+                val usedLocalRelationship = localRecommendations.isNotEmpty()
                 val recommendations =
                     if (localRecommendations.isNotEmpty() || !allowNetwork) {
                         localRecommendations
@@ -2467,10 +2473,21 @@ class MusicService :
                 }
 
                 val insertIndex = player.currentMediaItemIndex + 1
+                val recommendationReason =
+                    if (usedLocalRelationship) {
+                        echoBrainLocalRecommendationReason(
+                            seed = seedSong,
+                            recommendation = recommendations.first(),
+                            momentArtistIds = momentArtistIds,
+                            vaultArtistIds = vaultArtistIds,
+                        )
+                    } else {
+                        getString(R.string.echo_brain_reason_radio)
+                    }
                 val taggedRecommendations =
                     recommendations
                         .take(ECHO_BRAIN_MAXIMUM_BATCH_SIZE)
-                        .map(::markEchoBrainRecommendation)
+                        .map { markEchoBrainRecommendation(it, recommendationReason) }
                 player.addMediaItems(insertIndex, taggedRecommendations)
                 player.prepare()
                 echoBrainInjectedItemIds.addAll(taggedRecommendations.map { it.mediaId })
@@ -2564,9 +2581,34 @@ class MusicService :
      * Queue rows render MediaMetadata.suggestedBy, making actual Echo Brain additions visible
      * rather than indistinguishable from the user's original mix.
      */
-    private fun markEchoBrainRecommendation(mediaItem: MediaItem): MediaItem {
+    private fun markEchoBrainRecommendation(
+        mediaItem: MediaItem,
+        reason: String,
+    ): MediaItem {
         val metadata = mediaItem.metadata ?: return mediaItem
-        return metadata.copy(suggestedBy = getString(R.string.echo_brain)).toMediaItem()
+        return metadata.copy(
+            suggestedBy = "${getString(R.string.echo_brain)} · $reason",
+        ).toMediaItem()
+    }
+
+    /** Explains the strongest local signal without reducing the selected similarity threshold. */
+    private fun echoBrainLocalRecommendationReason(
+        seed: Song?,
+        recommendation: MediaItem,
+        momentArtistIds: Set<String>,
+        vaultArtistIds: Set<String>,
+    ): String {
+        val candidateMetadata = recommendation.metadata
+        val candidateArtists = candidateMetadata?.artists?.mapNotNull { it.id }?.toSet().orEmpty()
+        val seedArtists = seed?.orderedArtists?.map { it.id }?.toSet().orEmpty()
+        return when {
+            candidateArtists.any { it in seedArtists } -> getString(R.string.echo_brain_reason_artist)
+            seed?.song?.albumId != null && candidateMetadata?.album?.id == seed.song.albumId ->
+                getString(R.string.echo_brain_reason_album)
+            candidateArtists.any { it in momentArtistIds } -> getString(R.string.echo_brain_reason_co_listen)
+            candidateArtists.any { it in vaultArtistIds } -> getString(R.string.echo_brain_reason_vault)
+            else -> getString(R.string.echo_brain_reason_local_relation)
+        }
     }
 
     /**
@@ -2579,12 +2621,15 @@ class MusicService :
         allowNetwork: Boolean,
     ): List<Song> {
         val cachedSongs = database.relatedSongs(seedMediaId)
-        if (cachedSongs.any { it.id !in excludedIds } || !allowNetwork) return cachedSongs
+        val hasAvailableCachedSong = cachedSongs.any { it.id !in excludedIds }
+        if (!allowNetwork || (hasAvailableCachedSong && isEchoBrainRadioCacheFresh(seedMediaId))) {
+            return cachedSongs
+        }
 
         val relatedEndpoint =
             YouTube.next(WatchEndpoint(videoId = seedMediaId)).getOrNull()?.relatedEndpoint
-                ?: return emptyList()
-        val relatedPage = YouTube.related(relatedEndpoint).getOrNull() ?: return emptyList()
+                ?: return cachedSongs
+        val relatedPage = YouTube.related(relatedEndpoint).getOrNull() ?: return cachedSongs
         database.query {
             relatedPage.songs
                 .map(SongItem::toMediaMetadata)
@@ -2592,6 +2637,7 @@ class MusicService :
                 .map { RelatedSongMap(songId = seedMediaId, relatedSongId = it.id) }
                 .forEach(::insert)
         }
+        recordEchoBrainRadioCache(seedMediaId)
         return database.relatedSongs(seedMediaId)
     }
 
@@ -2708,6 +2754,45 @@ class MusicService :
             echoBrainRecentInjectionTimestamps.clear()
             echoBrainRecentInjectionTimestamps.putAll(parsed)
         }
+    }
+
+    /** Loads only fresh radio-cache timestamps; stale entries remain usable offline but refresh online. */
+    private fun seedEchoBrainRadioCacheFromPrefs() {
+        val now = System.currentTimeMillis()
+        val parsed = runCatching {
+            JSONObject(startupPrefs!![EchoBrainRadioRelationCacheKey].orEmpty()).let { json ->
+                buildMap {
+                    val keys = json.keys()
+                    while (keys.hasNext()) {
+                        val seedId = keys.next()
+                        val timestamp = json.optLong(seedId, 0L)
+                        if (timestamp > 0L && now - timestamp < ECHO_BRAIN_RADIO_CACHE_MILLIS) {
+                            put(seedId, timestamp)
+                        }
+                    }
+                }
+            }
+        }.getOrDefault(emptyMap())
+        synchronized(echoBrainRadioCacheLock) {
+            echoBrainRadioRelationTimestamps.clear()
+            echoBrainRadioRelationTimestamps.putAll(parsed)
+        }
+    }
+
+    private fun isEchoBrainRadioCacheFresh(seedMediaId: String): Boolean =
+        synchronized(echoBrainRadioCacheLock) {
+            val timestamp = echoBrainRadioRelationTimestamps[seedMediaId] ?: return@synchronized false
+            System.currentTimeMillis() - timestamp < ECHO_BRAIN_RADIO_CACHE_MILLIS
+        }
+
+    private suspend fun recordEchoBrainRadioCache(seedMediaId: String) {
+        val now = System.currentTimeMillis()
+        val serialized = synchronized(echoBrainRadioCacheLock) {
+            echoBrainRadioRelationTimestamps.entries.removeAll { now - it.value >= ECHO_BRAIN_RADIO_CACHE_MILLIS }
+            echoBrainRadioRelationTimestamps[seedMediaId] = now
+            JSONObject(echoBrainRadioRelationTimestamps as Map<*, *>).toString()
+        }
+        safeDataStoreEdit { prefs -> prefs[EchoBrainRadioRelationCacheKey] = serialized }
     }
 
     /** Returns canonical song keys that remain blocked for 24 hours after injection. */
@@ -3033,8 +3118,8 @@ class MusicService :
             EchoBrainQueuePlanner.shouldAutoInject(
                 currentIndex = currentIndex,
                 mediaItemCount = player.mediaItemCount,
-                currentIsEchoBrainRecommendation = mediaItem?.metadata?.suggestedBy == echoBrainLabel,
-                nextIsEchoBrainRecommendation = nextMediaItem?.metadata?.suggestedBy == echoBrainLabel,
+                currentIsEchoBrainRecommendation = mediaItem?.metadata?.suggestedBy?.startsWith(echoBrainLabel) == true,
+                nextIsEchoBrainRecommendation = nextMediaItem?.metadata?.suggestedBy?.startsWith(echoBrainLabel) == true,
                 hasInjectedRecommendations = echoBrainInjectedItemIds.isNotEmpty(),
                 dominantMode = cachedEchoBrainQueueContinuity == EchoBrainQueueContinuity.DOMINANT,
             )
