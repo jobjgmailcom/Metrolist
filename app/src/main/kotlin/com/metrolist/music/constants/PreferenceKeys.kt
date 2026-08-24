@@ -140,6 +140,7 @@ const val DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY = 90
 val EchoBrainMinimumSimilarityKey = intPreferencesKey("echoBrainMinimumSimilarity")
 val EchoBrainAllowAlternativeVersionsKey = booleanPreferencesKey("echoBrainAllowAlternativeVersions")
 val EchoBrainNetworkModeKey = stringPreferencesKey("echoBrainNetworkMode")
+val EchoBrainRecentInjectionHistoryKey = stringPreferencesKey("echoBrainRecentInjectionHistory")
 
 enum class EchoBrainNetworkMode {
     LOCAL_ONLY,

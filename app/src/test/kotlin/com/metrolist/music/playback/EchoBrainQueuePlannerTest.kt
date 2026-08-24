@@ -162,6 +162,23 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `daily repeat guard blocks every injected song for exactly 24 hours`() {
+        val now = 2_000_000_000L
+        val day = 24L * 60L * 60L * 1000L
+        val blocked = EchoBrainQueuePlanner.activeCooldownSongKeys(
+            injectionTimestamps = mapOf(
+                "nadie" to now - day + 1L,
+                "another-song" to now - 60_000L,
+                "expired-song" to now - day,
+            ),
+            nowMillis = now,
+            cooldownMillis = day,
+        )
+
+        assertEquals(setOf("nadie", "another-song"), blocked)
+    }
+
+    @Test
     fun `automatic injection starts a mix and refills when the last Echo Brain item plays`() {
         assertEquals(
             true,

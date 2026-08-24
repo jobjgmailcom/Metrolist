@@ -216,9 +216,9 @@
     <string name="echo_brain_alternative_versions_on">Puede inyectar remixes y versiones en vivo o acústicas si cumplen la regla de similitud.</string>
     <string name="echo_brain_alternative_versions_off">Solo se inyectan grabaciones principales; se bloquean remixes, directos, acústicas y covers.</string>
     <string name="echo_brain_network">Uso de red para recomendaciones</string>
-    <string name="echo_brain_network_local">Solo local</string>
-    <string name="echo_brain_network_local_desc">Usa únicamente relaciones guardadas. No consume datos para recomendaciones.</string>
-    <string name="echo_brain_network_wifi">Wi-Fi y local</string>
+    <string name="echo_brain_network_local">Modo local (sin red)</string>
+    <string name="echo_brain_network_local_desc">Usa únicamente relaciones guardadas en MetroList. No consulta Wi-Fi ni datos móviles.</string>
+    <string name="echo_brain_network_wifi">Wi-Fi + modo local</string>
     <string name="echo_brain_network_wifi_desc">Usa relaciones guardadas en cualquier momento y actualiza radio solamente con Wi-Fi.</string>
     <string name="echo_brain_network_any">Wi-Fi y datos móviles</string>
     <string name="echo_brain_network_any_desc">Permite actualizaciones en cualquier red conectada.</string>
