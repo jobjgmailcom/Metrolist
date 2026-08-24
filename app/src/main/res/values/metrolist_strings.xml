@@ -248,6 +248,11 @@
     <string name="echo_brain_listening_confirmation_60_desc">Use a track as a positive signal after you listen to at least 60%%. Recommended.</string>
     <string name="echo_brain_listening_confirmation_80">After 80%%</string>
     <string name="echo_brain_listening_confirmation_80_desc">Wait for a stronger listening signal before injecting a recommendation.</string>
+    <string name="echo_brain_queue_continuity">Queue continuity</string>
+    <string name="echo_brain_queue_continuity_mix">Preserve mix</string>
+    <string name="echo_brain_queue_continuity_mix_desc">Keep the original mix pacing and add Echo Brain only at standard refill points.</string>
+    <string name="echo_brain_queue_continuity_dominant">Echo Brain dominant</string>
+    <string name="echo_brain_queue_continuity_dominant_desc">Chain valid Echo Brain songs. Let only one original song play when no candidate reaches the selected similarity, then retry.</string>
     <string name="echo_brain_network">Recommendation network use</string>
     <string name="echo_brain_network_local">Local mode (no network)</string>
     <string name="echo_brain_network_local_desc">Uses only relations saved in MetroList. It does not query Wi-Fi or mobile data.</string>

@@ -42,6 +42,8 @@ import com.metrolist.music.constants.EchoBrainListeningConfirmationKey
 import com.metrolist.music.constants.EchoBrainMinimumSimilarityKey
 import com.metrolist.music.constants.EchoBrainNetworkMode
 import com.metrolist.music.constants.EchoBrainNetworkModeKey
+import com.metrolist.music.constants.EchoBrainQueueContinuity
+import com.metrolist.music.constants.EchoBrainQueueContinuityKey
 import com.metrolist.music.ui.component.EnumDialog
 import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.Material3SettingsGroup
@@ -73,6 +75,12 @@ fun EchoBrainSettings(
             defaultValue = EchoBrainListeningConfirmation.SIXTY_PERCENT.name,
         )
     val listeningConfirmation = EchoBrainListeningConfirmation.fromPreference(listeningConfirmationValue)
+    val (queueContinuityValue, onQueueContinuityChange) =
+        rememberPreference(
+            EchoBrainQueueContinuityKey,
+            defaultValue = EchoBrainQueueContinuity.DOMINANT.name,
+        )
+    val queueContinuity = EchoBrainQueueContinuity.fromPreference(queueContinuityValue)
     val (networkModeValue, onNetworkModeChange) =
         rememberPreference(EchoBrainNetworkModeKey, defaultValue = EchoBrainNetworkMode.WIFI_ONLY.name)
     val networkMode = EchoBrainNetworkMode.fromPreference(networkModeValue)
@@ -80,6 +88,7 @@ fun EchoBrainSettings(
     var showSimilarityDialog by rememberSaveable { mutableStateOf(false) }
     var showArtistDiversityDialog by rememberSaveable { mutableStateOf(false) }
     var showListeningConfirmationDialog by rememberSaveable { mutableStateOf(false) }
+    var showQueueContinuityDialog by rememberSaveable { mutableStateOf(false) }
     var showNetworkDialog by rememberSaveable { mutableStateOf(false) }
 
     if (showSimilarityDialog) {
@@ -139,6 +148,21 @@ fun EchoBrainSettings(
             values = EchoBrainListeningConfirmation.entries.toList(),
             valueText = { confirmation -> listeningConfirmationLabel(confirmation) },
             valueDescription = { confirmation -> listeningConfirmationDescription(confirmation) },
+        )
+    }
+
+    if (showQueueContinuityDialog) {
+        EnumDialog(
+            onDismiss = { showQueueContinuityDialog = false },
+            onSelect = {
+                onQueueContinuityChange(it.name)
+                showQueueContinuityDialog = false
+            },
+            title = stringResource(R.string.echo_brain_queue_continuity),
+            current = queueContinuity,
+            values = EchoBrainQueueContinuity.entries.toList(),
+            valueText = { continuity -> queueContinuityLabel(continuity) },
+            valueDescription = { continuity -> queueContinuityDescription(continuity) },
         )
     }
 
@@ -228,6 +252,12 @@ fun EchoBrainSettings(
                     title = { Text(stringResource(R.string.echo_brain_listening_confirmation)) },
                     description = { Text(listeningConfirmationLabel(listeningConfirmation)) },
                     onClick = { showListeningConfirmationDialog = true },
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.queue_music),
+                    title = { Text(stringResource(R.string.echo_brain_queue_continuity)) },
+                    description = { Text(queueContinuityLabel(queueContinuity)) },
+                    onClick = { showQueueContinuityDialog = true },
                 ),
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.wifi_proxy),
@@ -344,4 +374,18 @@ private fun listeningConfirmationDescription(confirmation: EchoBrainListeningCon
         EchoBrainListeningConfirmation.IMMEDIATE -> stringResource(R.string.echo_brain_listening_confirmation_immediate_desc)
         EchoBrainListeningConfirmation.SIXTY_PERCENT -> stringResource(R.string.echo_brain_listening_confirmation_60_desc)
         EchoBrainListeningConfirmation.EIGHTY_PERCENT -> stringResource(R.string.echo_brain_listening_confirmation_80_desc)
+    }
+
+@Composable
+private fun queueContinuityLabel(continuity: EchoBrainQueueContinuity): String =
+    when (continuity) {
+        EchoBrainQueueContinuity.MIX_PRESERVING -> stringResource(R.string.echo_brain_queue_continuity_mix)
+        EchoBrainQueueContinuity.DOMINANT -> stringResource(R.string.echo_brain_queue_continuity_dominant)
+    }
+
+@Composable
+private fun queueContinuityDescription(continuity: EchoBrainQueueContinuity): String =
+    when (continuity) {
+        EchoBrainQueueContinuity.MIX_PRESERVING -> stringResource(R.string.echo_brain_queue_continuity_mix_desc)
+        EchoBrainQueueContinuity.DOMINANT -> stringResource(R.string.echo_brain_queue_continuity_dominant_desc)
     }
