@@ -204,7 +204,7 @@
     <string name="cache_size_warning_message">El límite que has elegido (%1$s) es menor que el que la aplicación usa actualmente. Si continúas, podrían eliminarse algunos %2$s almacenados en caché. ¿Quieres continuar de todos modos?</string>
     <string name="cache_size_warning_confirm">Continuar</string>
     <string name="lyrics_romanize_chinese">Romanizar letras chinas</string>
-    <string name="echo_brain_strict_section_desc">Echo Brain solo inyecta recomendaciones que cumplen tu regla de similitud. Puede añadir menos de tres canciones antes que añadir música sin relación.</string>
+    <string name="echo_brain_strict_section_desc">Echo Brain solo inyecta recomendaciones que cumplen tu regla de similitud. El año de publicación no reduce la afinidad: puede unir décadas distintas si género, artista o contexto siguen relacionados.</string>
     <string name="echo_brain_similarity">Similitud mínima</string>
     <string name="echo_brain_similarity_90">Estricto · 90%%</string>
     <string name="echo_brain_similarity_90_desc">Solo inyecta una canción relacionada muy fuerte por ciclo. Recomendado para evitar sorpresas.</string>
@@ -212,6 +212,8 @@
     <string name="echo_brain_similarity_80_desc">Mantiene recomendaciones muy relacionadas y permite un poco más de variedad.</string>
     <string name="echo_brain_similarity_70">Descubrimiento · 70%%</string>
     <string name="echo_brain_similarity_70_desc">Permite recomendaciones más amplias, pero todavía relacionadas.</string>
+    <string name="echo_brain_similarity_60">Flexible · 60%%</string>
+    <string name="echo_brain_similarity_60_desc">Amplía el descubrimiento entre épocas cuando la relación guardada es relevante. Se mantienen los bloqueos de duplicados, versiones y artistas repetidos.</string>
     <string name="echo_brain_alternative_versions">Permitir versiones alternativas</string>
     <string name="echo_brain_alternative_versions_on">Puede inyectar remixes y versiones en vivo o acústicas si cumplen la regla de similitud.</string>
     <string name="echo_brain_alternative_versions_off">Solo se inyectan grabaciones principales; se bloquean remixes, directos, acústicas y covers.</string>
@@ -220,8 +222,8 @@
     <string name="echo_brain_network_local_desc">Usa únicamente relaciones guardadas en MetroList. No consulta Wi-Fi ni datos móviles.</string>
     <string name="echo_brain_network_wifi">Wi-Fi + modo local</string>
     <string name="echo_brain_network_wifi_desc">Usa relaciones guardadas en cualquier momento y actualiza radio solamente con Wi-Fi.</string>
-    <string name="echo_brain_network_any">Wi-Fi y datos móviles</string>
-    <string name="echo_brain_network_any_desc">Permite actualizaciones en cualquier red conectada.</string>
+    <string name="echo_brain_network_any">Wi-Fi + datos móviles + modo local</string>
+    <string name="echo_brain_network_any_desc">Usa relaciones guardadas en cualquier momento y actualiza radio con Wi-Fi o datos móviles.</string>
     <string name="echo_brain_strict_filter">Evita música sin relación</string>
     <string name="echo_brain_strict_filter_desc">Exige la afinidad configurada, excluye canciones existentes, bloquea versiones no permitidas y limita artistas repetidos en cada lote.</string>
     <string name="logging_in">Iniciando sesión…</string>

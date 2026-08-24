@@ -162,6 +162,44 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `strict selection allows a related song from another release year`() {
+        val seedFrom2004 = song(id = "gasolina-2004", artistId = "reggaeton-anchor", year = 2004)
+        val relatedSongFrom2026 = song(
+            id = "reggaeton-2026",
+            artistId = "reggaeton-anchor",
+            year = 2026,
+        )
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = seedFrom2004,
+            relatedSongs = listOf(relatedSongFrom2026),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            minimumSimilarity = 90,
+            allowAlternativeVersions = false,
+        )
+
+        assertEquals(listOf("reggaeton-2026"), selected.map { it.mediaId })
+    }
+
+    @Test
+    fun `flexible 60 selection keeps graph relations across decades`() {
+        val seedFrom2026 = song(id = "new-release-2026", artistId = "new-anchor", year = 2026)
+        val relatedSongFrom2000 = song(id = "related-2000", artistId = "classic-related", year = 2000)
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = seedFrom2026,
+            relatedSongs = listOf(relatedSongFrom2000),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            minimumSimilarity = 60,
+            allowAlternativeVersions = false,
+        )
+
+        assertEquals(listOf("related-2000"), selected.map { it.mediaId })
+    }
+
+    @Test
     fun `daily repeat guard blocks every injected song for exactly 24 hours`() {
         val now = 2_000_000_000L
         val day = 24L * 60L * 60L * 1000L
@@ -228,6 +266,7 @@ class EchoBrainQueuePlannerTest {
         liked: Boolean = false,
         totalPlayTime: Long = 0L,
         artistId: String? = null,
+        year: Int? = null,
     ): Song =
         Song(
             song = SongEntity(
@@ -235,6 +274,7 @@ class EchoBrainQueuePlannerTest {
                 title = title,
                 liked = liked,
                 totalPlayTime = totalPlayTime,
+                year = year,
             ),
             artists = artistId?.let { listOf(ArtistEntity(id = it, name = it)) }.orEmpty(),
         )
