@@ -1215,9 +1215,7 @@ class MusicService :
                 val wasEnabled = cachedEchoBrainEnabled
                 cachedEchoBrainEnabled = enabled
                 if (enabled && !wasEnabled) {
-                    player.currentMediaItem?.mediaId
-                        ?.takeIf { it.isNotBlank() }
-                        ?.let(::injectEchoBrainRecommendations)
+                    scheduleEchoBrainListeningConfirmation()
                 }
             }
         }
