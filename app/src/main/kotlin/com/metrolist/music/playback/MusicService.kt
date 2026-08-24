@@ -122,7 +122,11 @@ import com.metrolist.music.constants.CrossfadeGaplessKey
 import com.metrolist.music.constants.DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY
 import com.metrolist.music.constants.DisableLoadMoreWhenRepeatAllKey
 import com.metrolist.music.constants.EchoBrainAllowAlternativeVersionsKey
+import com.metrolist.music.constants.EchoBrainArtistDiversity
+import com.metrolist.music.constants.EchoBrainArtistDiversityKey
 import com.metrolist.music.constants.EchoBrainEnabledKey
+import com.metrolist.music.constants.EchoBrainListeningConfirmation
+import com.metrolist.music.constants.EchoBrainListeningConfirmationKey
 import com.metrolist.music.constants.EchoBrainMinimumSimilarityKey
 import com.metrolist.music.constants.EchoBrainNetworkMode
 import com.metrolist.music.constants.EchoBrainNetworkModeKey
@@ -319,6 +323,8 @@ class MusicService :
     private var crossfadeDuration = 5000f
     private var crossfadeGapless = true
     private var crossfadeMessage: PlayerMessage? = null
+    private var echoBrainConfirmationMessage: PlayerMessage? = null
+    private var echoBrainConfirmationMediaId: String? = null
 
     private val secondaryPlayerListener =
         object : Player.Listener {
@@ -518,6 +524,10 @@ class MusicService :
     @Volatile
     private var cachedEchoBrainAllowAlternativeVersions = false
     @Volatile
+    private var cachedEchoBrainArtistDiversity = EchoBrainArtistDiversity.BALANCED
+    @Volatile
+    private var cachedEchoBrainListeningConfirmation = EchoBrainListeningConfirmation.SIXTY_PERCENT
+    @Volatile
     private var cachedEchoBrainNetworkMode = EchoBrainNetworkMode.WIFI_ONLY
     @Volatile
     private var cachedEchoBrainVaultArtistIds: Set<String>? = null
@@ -527,6 +537,7 @@ class MusicService :
     private val echoBrainInFlightSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInjectedItemIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInjectedSongKeys = Collections.synchronizedSet(mutableSetOf<String>())
+    private val echoBrainRecentArtistKeys = Collections.synchronizedList(mutableListOf<String>())
 
     // URL cache for stream URLs - class-level so it can be invalidated on errors
     private val songUrlCache = StreamUrlCache()
@@ -1225,6 +1236,18 @@ class MusicService :
         }
         scope.launch {
             dataStore.data
+                .map { EchoBrainArtistDiversity.fromPreference(it[EchoBrainArtistDiversityKey]) }
+                .distinctUntilChanged()
+                .collect { cachedEchoBrainArtistDiversity = it }
+        }
+        scope.launch {
+            dataStore.data
+                .map { EchoBrainListeningConfirmation.fromPreference(it[EchoBrainListeningConfirmationKey]) }
+                .distinctUntilChanged()
+                .collect { cachedEchoBrainListeningConfirmation = it }
+        }
+        scope.launch {
+            dataStore.data
                 .map { EchoBrainNetworkMode.fromPreference(it[EchoBrainNetworkModeKey]) }
                 .distinctUntilChanged()
                 .collect { cachedEchoBrainNetworkMode = it }
@@ -1837,6 +1860,10 @@ class MusicService :
         echoBrainInFlightSeedIds.clear()
         echoBrainInjectedItemIds.clear()
         echoBrainInjectedSongKeys.clear()
+        echoBrainRecentArtistKeys.clear()
+        echoBrainConfirmationMessage?.cancel()
+        echoBrainConfirmationMessage = null
+        echoBrainConfirmationMediaId = null
         val persistShuffleAcrossQueues = dataStore.get(PersistentShuffleAcrossQueuesKey, false)
         if (!persistShuffleAcrossQueues && !restoringQueue) {
             player.shuffleModeEnabled = false
@@ -1894,9 +1921,7 @@ class MusicService :
                 applyShuffleOrder(player.currentMediaItemIndex, player.mediaItemCount, shufflePlaylistFirst)
             }
 
-            player.currentMediaItem?.mediaId
-                ?.takeIf { cachedEchoBrainEnabled && it.isNotBlank() }
-                ?.let(::injectEchoBrainRecommendations)
+            scheduleEchoBrainListeningConfirmation()
         }
     }
 
@@ -2374,6 +2399,7 @@ class MusicService :
                         cooldownSongKeys
                 val allowNetwork = canUseEchoBrainNetwork()
                 val seedItem = player.currentMediaItem ?: return@launch
+                val blockedArtistKeys = echoBrainBlockedArtistKeys(seedItem)
                 val currentIndex = player.currentMediaItemIndex
                 val momentArtistIds =
                     queuedItems
@@ -2403,6 +2429,7 @@ class MusicService :
                         queuedIds = queuedIds,
                         previouslyInjectedIds = echoBrainInjectedItemIds,
                         blockedSongKeys = blockedSongKeys,
+                        blockedArtistKeys = blockedArtistKeys,
                         momentArtistIds = momentArtistIds,
                         vaultArtistIds = vaultArtistIds,
                         minimumSimilarity = cachedEchoBrainMinimumSimilarity,
@@ -2418,6 +2445,7 @@ class MusicService :
                                 seedMediaId = seedMediaId,
                                 excludedIds = queuedIds + echoBrainInjectedItemIds,
                                 blockedSongKeys = blockedSongKeys,
+                                blockedArtistKeys = blockedArtistKeys,
                                 seed = seedItem,
                                 momentArtistIds = momentArtistIds,
                                 vaultArtistIds = vaultArtistIds,
@@ -2439,6 +2467,7 @@ class MusicService :
                 player.prepare()
                 echoBrainInjectedItemIds.addAll(taggedRecommendations.map { it.mediaId })
                 echoBrainInjectedSongKeys.addAll(EchoBrainQueuePlanner.canonicalSongKeys(taggedRecommendations))
+                recordEchoBrainArtistKeys(taggedRecommendations)
                 recordEchoBrainInjectionHistory(
                     EchoBrainQueuePlanner.canonicalSongKeys(taggedRecommendations),
                 )
@@ -2471,6 +2500,7 @@ class MusicService :
         seedMediaId: String,
         excludedIds: Set<String>,
         blockedSongKeys: Set<String>,
+        blockedArtistKeys: Set<String>,
         seed: MediaItem,
         momentArtistIds: Set<String>,
         vaultArtistIds: Set<String>,
@@ -2491,6 +2521,7 @@ class MusicService :
                 queuedIds = excludedIds,
                 previouslyInjectedIds = emptySet(),
                 blockedSongKeys = blockedSongKeys,
+                blockedArtistKeys = blockedArtistKeys,
                 seed = seed,
                 momentArtistIds = momentArtistIds,
                 vaultArtistIds = vaultArtistIds,
@@ -2508,6 +2539,7 @@ class MusicService :
                     queuedIds = excludedIds,
                     previouslyInjectedIds = emptySet(),
                     blockedSongKeys = blockedSongKeys,
+                    blockedArtistKeys = blockedArtistKeys,
                     seed = seed,
                     momentArtistIds = momentArtistIds,
                     vaultArtistIds = vaultArtistIds,
@@ -2566,6 +2598,66 @@ class MusicService :
                     ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
             }
         }
+
+    /** Artist rotation only constrains Echo Brain additions; the original queue is never changed. */
+    private fun echoBrainBlockedArtistKeys(seed: MediaItem): Set<String> =
+        synchronized(echoBrainRecentArtistKeys) {
+            when (cachedEchoBrainArtistDiversity) {
+                EchoBrainArtistDiversity.UNLIMITED -> emptySet()
+                EchoBrainArtistDiversity.BALANCED -> echoBrainRecentArtistKeys.takeLast(2).toSet()
+                EchoBrainArtistDiversity.HIGH ->
+                    echoBrainRecentArtistKeys.takeLast(3).toSet() +
+                        EchoBrainQueuePlanner.primaryArtistKeys(listOf(seed))
+            }
+        }
+
+    /** Keeps only the short rolling window required by the selected diversity policy. */
+    private fun recordEchoBrainArtistKeys(items: List<MediaItem>) {
+        val artistKeys = EchoBrainQueuePlanner.primaryArtistKeys(items)
+        if (artistKeys.isEmpty()) return
+        synchronized(echoBrainRecentArtistKeys) {
+            echoBrainRecentArtistKeys.addAll(artistKeys)
+            while (echoBrainRecentArtistKeys.size > 3) {
+                echoBrainRecentArtistKeys.removeAt(0)
+            }
+        }
+    }
+
+    /**
+     * Defers automatic insertion until the configured portion of the active track has actually
+     * played. A Media3 position message is event-driven and avoids a polling loop or timer.
+     */
+    private fun scheduleEchoBrainListeningConfirmation() {
+        if (!cachedEchoBrainEnabled) return
+        val mediaId = player.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
+        val confirmation = cachedEchoBrainListeningConfirmation
+        if (confirmation == EchoBrainListeningConfirmation.IMMEDIATE) {
+            injectEchoBrainRecommendations(mediaId)
+            return
+        }
+
+        val duration = player.duration
+        if (duration == C.TIME_UNSET || duration <= 0L) return
+        val triggerPosition = duration * confirmation.percent / 100L
+        if (player.currentPosition >= triggerPosition) {
+            injectEchoBrainRecommendations(mediaId)
+            return
+        }
+        if (echoBrainConfirmationMediaId == mediaId && echoBrainConfirmationMessage != null) return
+
+        echoBrainConfirmationMessage?.cancel()
+        echoBrainConfirmationMediaId = mediaId
+        echoBrainConfirmationMessage = player.createMessage { _, _ ->
+            echoBrainConfirmationMessage = null
+            if (player.isPlaying && player.currentMediaItem?.mediaId == mediaId) {
+                injectEchoBrainRecommendations(mediaId)
+            }
+        }.apply {
+            setLooper(Looper.getMainLooper())
+            setPosition(triggerPosition)
+            send()
+        }
+    }
 
     /**
      * Bóveda local: top artists from listening history. The result is cached for the service
@@ -2938,7 +3030,7 @@ class MusicService :
                 hasInjectedRecommendations = echoBrainInjectedItemIds.isNotEmpty(),
             )
         ) {
-            mediaItem?.mediaId?.takeIf { it.isNotBlank() }?.let(::injectEchoBrainRecommendations)
+            scheduleEchoBrainListeningConfirmation()
         }
 
         if (cachedAutoLoadMore &&
@@ -3151,6 +3243,14 @@ class MusicService :
                     screenOffHandler.postDelayed(pauseTimeout, 60_000)
                 }
             }
+        }
+
+        if (events.containsAny(
+                Player.EVENT_PLAYBACK_STATE_CHANGED,
+                Player.EVENT_IS_PLAYING_CHANGED,
+            ) && player.isPlaying
+        ) {
+            scheduleEchoBrainListeningConfirmation()
         }
 
         if (events.containsAny(

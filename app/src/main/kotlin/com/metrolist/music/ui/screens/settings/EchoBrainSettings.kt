@@ -34,7 +34,11 @@ import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.constants.DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY
 import com.metrolist.music.constants.EchoBrainAllowAlternativeVersionsKey
+import com.metrolist.music.constants.EchoBrainArtistDiversity
+import com.metrolist.music.constants.EchoBrainArtistDiversityKey
 import com.metrolist.music.constants.EchoBrainEnabledKey
+import com.metrolist.music.constants.EchoBrainListeningConfirmation
+import com.metrolist.music.constants.EchoBrainListeningConfirmationKey
 import com.metrolist.music.constants.EchoBrainMinimumSimilarityKey
 import com.metrolist.music.constants.EchoBrainNetworkMode
 import com.metrolist.music.constants.EchoBrainNetworkModeKey
@@ -60,11 +64,22 @@ fun EchoBrainSettings(
         )
     val (allowAlternativeVersions, onAllowAlternativeVersionsChange) =
         rememberPreference(EchoBrainAllowAlternativeVersionsKey, defaultValue = false)
+    val (artistDiversityValue, onArtistDiversityChange) =
+        rememberPreference(EchoBrainArtistDiversityKey, defaultValue = EchoBrainArtistDiversity.BALANCED.name)
+    val artistDiversity = EchoBrainArtistDiversity.fromPreference(artistDiversityValue)
+    val (listeningConfirmationValue, onListeningConfirmationChange) =
+        rememberPreference(
+            EchoBrainListeningConfirmationKey,
+            defaultValue = EchoBrainListeningConfirmation.SIXTY_PERCENT.name,
+        )
+    val listeningConfirmation = EchoBrainListeningConfirmation.fromPreference(listeningConfirmationValue)
     val (networkModeValue, onNetworkModeChange) =
         rememberPreference(EchoBrainNetworkModeKey, defaultValue = EchoBrainNetworkMode.WIFI_ONLY.name)
     val networkMode = EchoBrainNetworkMode.fromPreference(networkModeValue)
 
     var showSimilarityDialog by rememberSaveable { mutableStateOf(false) }
+    var showArtistDiversityDialog by rememberSaveable { mutableStateOf(false) }
+    var showListeningConfirmationDialog by rememberSaveable { mutableStateOf(false) }
     var showNetworkDialog by rememberSaveable { mutableStateOf(false) }
 
     if (showSimilarityDialog) {
@@ -94,6 +109,36 @@ fun EchoBrainSettings(
             values = EchoBrainNetworkMode.entries.toList(),
             valueText = { mode -> networkModeLabel(mode) },
             valueDescription = { mode -> networkModeDescription(mode) },
+        )
+    }
+
+    if (showArtistDiversityDialog) {
+        EnumDialog(
+            onDismiss = { showArtistDiversityDialog = false },
+            onSelect = {
+                onArtistDiversityChange(it.name)
+                showArtistDiversityDialog = false
+            },
+            title = stringResource(R.string.echo_brain_artist_diversity),
+            current = artistDiversity,
+            values = EchoBrainArtistDiversity.entries.toList(),
+            valueText = { diversity -> artistDiversityLabel(diversity) },
+            valueDescription = { diversity -> artistDiversityDescription(diversity) },
+        )
+    }
+
+    if (showListeningConfirmationDialog) {
+        EnumDialog(
+            onDismiss = { showListeningConfirmationDialog = false },
+            onSelect = {
+                onListeningConfirmationChange(it.name)
+                showListeningConfirmationDialog = false
+            },
+            title = stringResource(R.string.echo_brain_listening_confirmation),
+            current = listeningConfirmation,
+            values = EchoBrainListeningConfirmation.entries.toList(),
+            valueText = { confirmation -> listeningConfirmationLabel(confirmation) },
+            valueDescription = { confirmation -> listeningConfirmationDescription(confirmation) },
         )
     }
 
@@ -171,6 +216,18 @@ fun EchoBrainSettings(
                         )
                     },
                     onClick = { onAllowAlternativeVersionsChange(!allowAlternativeVersions) },
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.group),
+                    title = { Text(stringResource(R.string.echo_brain_artist_diversity)) },
+                    description = { Text(artistDiversityLabel(artistDiversity)) },
+                    onClick = { showArtistDiversityDialog = true },
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.timer),
+                    title = { Text(stringResource(R.string.echo_brain_listening_confirmation)) },
+                    description = { Text(listeningConfirmationLabel(listeningConfirmation)) },
+                    onClick = { showListeningConfirmationDialog = true },
                 ),
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.wifi_proxy),
@@ -255,4 +312,36 @@ private fun networkModeDescription(mode: EchoBrainNetworkMode): String =
         EchoBrainNetworkMode.LOCAL_ONLY -> stringResource(R.string.echo_brain_network_local_desc)
         EchoBrainNetworkMode.WIFI_ONLY -> stringResource(R.string.echo_brain_network_wifi_desc)
         EchoBrainNetworkMode.ANY_NETWORK -> stringResource(R.string.echo_brain_network_any_desc)
+    }
+
+@Composable
+private fun artistDiversityLabel(diversity: EchoBrainArtistDiversity): String =
+    when (diversity) {
+        EchoBrainArtistDiversity.UNLIMITED -> stringResource(R.string.echo_brain_artist_diversity_unlimited)
+        EchoBrainArtistDiversity.BALANCED -> stringResource(R.string.echo_brain_artist_diversity_balanced)
+        EchoBrainArtistDiversity.HIGH -> stringResource(R.string.echo_brain_artist_diversity_high)
+    }
+
+@Composable
+private fun artistDiversityDescription(diversity: EchoBrainArtistDiversity): String =
+    when (diversity) {
+        EchoBrainArtistDiversity.UNLIMITED -> stringResource(R.string.echo_brain_artist_diversity_unlimited_desc)
+        EchoBrainArtistDiversity.BALANCED -> stringResource(R.string.echo_brain_artist_diversity_balanced_desc)
+        EchoBrainArtistDiversity.HIGH -> stringResource(R.string.echo_brain_artist_diversity_high_desc)
+    }
+
+@Composable
+private fun listeningConfirmationLabel(confirmation: EchoBrainListeningConfirmation): String =
+    when (confirmation) {
+        EchoBrainListeningConfirmation.IMMEDIATE -> stringResource(R.string.echo_brain_listening_confirmation_immediate)
+        EchoBrainListeningConfirmation.SIXTY_PERCENT -> stringResource(R.string.echo_brain_listening_confirmation_60)
+        EchoBrainListeningConfirmation.EIGHTY_PERCENT -> stringResource(R.string.echo_brain_listening_confirmation_80)
+    }
+
+@Composable
+private fun listeningConfirmationDescription(confirmation: EchoBrainListeningConfirmation): String =
+    when (confirmation) {
+        EchoBrainListeningConfirmation.IMMEDIATE -> stringResource(R.string.echo_brain_listening_confirmation_immediate_desc)
+        EchoBrainListeningConfirmation.SIXTY_PERCENT -> stringResource(R.string.echo_brain_listening_confirmation_60_desc)
+        EchoBrainListeningConfirmation.EIGHTY_PERCENT -> stringResource(R.string.echo_brain_listening_confirmation_80_desc)
     }
