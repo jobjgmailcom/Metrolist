@@ -124,6 +124,7 @@ import com.metrolist.music.constants.EchoBrainEnabledKey
 import com.metrolist.music.constants.EchoBrainMinimumSimilarityKey
 import com.metrolist.music.constants.EchoBrainNetworkMode
 import com.metrolist.music.constants.EchoBrainNetworkModeKey
+import com.metrolist.music.constants.EchoBrainRecentInjectionHistoryKey
 import com.metrolist.music.constants.DiscordActivityNameKey
 import com.metrolist.music.constants.DiscordActivityTypeKey
 import com.metrolist.music.constants.DiscordAdvancedModeKey
@@ -225,6 +226,7 @@ import com.metrolist.music.utils.cipher.CipherDeobfuscator
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import com.metrolist.music.utils.reportException
+import com.metrolist.music.utils.safeDataStoreEdit
 import com.metrolist.music.widget.MetrolistWidgetManager
 import com.metrolist.music.widget.MusicWidgetReceiver
 import com.metrolist.music.widget.PlaylistWidgetReceiver
@@ -262,12 +264,15 @@ import timber.log.Timber
 import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
 import java.time.LocalDateTime
+import org.json.JSONObject
 import javax.inject.Inject
 import kotlin.random.Random
 import java.util.Collections
 
 private const val INSTANT_SILENCE_SKIP_STEP_MS = 15_000L
 private const val INSTANT_SILENCE_SKIP_SETTLE_MS = 350L
+private const val ECHO_BRAIN_MAXIMUM_BATCH_SIZE = 1
+private const val ECHO_BRAIN_REPEAT_COOLDOWN_MILLIS = 24L * 60L * 60L * 1000L
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -515,6 +520,8 @@ class MusicService :
     private var cachedEchoBrainNetworkMode = EchoBrainNetworkMode.WIFI_ONLY
     @Volatile
     private var cachedEchoBrainVaultArtistIds: Set<String>? = null
+    private val echoBrainInjectionHistoryLock = Any()
+    private val echoBrainRecentInjectionTimestamps = mutableMapOf<String, Long>()
     private val echoBrainProcessedSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInFlightSeedIds = Collections.synchronizedSet(mutableSetOf<String>())
     private val echoBrainInjectedItemIds = Collections.synchronizedSet(mutableSetOf<String>())
@@ -650,6 +657,7 @@ class MusicService :
         // handled in createExoPlayer
 
         seedLoudnessCacheFromPrefs()
+        seedEchoBrainInjectionHistoryFromPrefs()
 
         val defaultMediaNotificationProvider =
             DefaultMediaNotificationProvider(
@@ -2353,8 +2361,11 @@ class MusicService :
             try {
                 val queuedItems = player.mediaItems
                 val queuedIds = queuedItems.mapTo(mutableSetOf()) { it.mediaId }
+                val cooldownSongKeys = currentEchoBrainCooldownSongKeys()
                 val blockedSongKeys =
-                    EchoBrainQueuePlanner.canonicalSongKeys(queuedItems) + echoBrainInjectedSongKeys
+                    EchoBrainQueuePlanner.canonicalSongKeys(queuedItems) +
+                        echoBrainInjectedSongKeys +
+                        cooldownSongKeys
                 val allowNetwork = canUseEchoBrainNetwork()
                 val seedItem = player.currentMediaItem ?: return@launch
                 val currentIndex = player.currentMediaItemIndex
@@ -2366,12 +2377,8 @@ class MusicService :
                         .filter { it.isNotBlank() }
                         .toSet()
                 val vaultArtistIds = withContext(Dispatchers.IO) { echoBrainVaultArtistIds() }
-                val maximumBatchSize =
-                    if (cachedEchoBrainMinimumSimilarity >= DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY) {
-                        1
-                    } else {
-                        EchoBrainQueuePlanner.DEFAULT_BATCH_SIZE
-                    }
+                // A hard ceiling avoids filling the queue even if a source returns many matches.
+                val maximumBatchSize = ECHO_BRAIN_MAXIMUM_BATCH_SIZE
                 val relatedSongs = withContext(Dispatchers.IO) {
                     loadEchoBrainRelatedSongs(
                         seedMediaId = seedMediaId,
@@ -2418,11 +2425,17 @@ class MusicService :
                 }
 
                 val insertIndex = player.currentMediaItemIndex + 1
-                val taggedRecommendations = recommendations.map(::markEchoBrainRecommendation)
+                val taggedRecommendations =
+                    recommendations
+                        .take(ECHO_BRAIN_MAXIMUM_BATCH_SIZE)
+                        .map(::markEchoBrainRecommendation)
                 player.addMediaItems(insertIndex, taggedRecommendations)
                 player.prepare()
                 echoBrainInjectedItemIds.addAll(taggedRecommendations.map { it.mediaId })
                 echoBrainInjectedSongKeys.addAll(EchoBrainQueuePlanner.canonicalSongKeys(taggedRecommendations))
+                recordEchoBrainInjectionHistory(
+                    EchoBrainQueuePlanner.canonicalSongKeys(taggedRecommendations),
+                )
                 echoBrainProcessedSeedIds.add(seedMediaId)
 
                 if (player.shuffleModeEnabled) {
@@ -2565,6 +2578,60 @@ class MusicService :
             .filter { it.isNotBlank() }
             .toSet()
             .also { cachedEchoBrainVaultArtistIds = it }
+    }
+
+    /** Loads the daily repeat guard once, then keeps it in memory for cheap queue checks. */
+    private fun seedEchoBrainInjectionHistoryFromPrefs() {
+        val now = System.currentTimeMillis()
+        val serialized = startupPrefs!![EchoBrainRecentInjectionHistoryKey]
+        val parsed = runCatching {
+            JSONObject(serialized.orEmpty()).let { json ->
+                buildMap {
+                    val keys = json.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val timestamp = json.optLong(key, 0L)
+                        if (timestamp > 0L && now - timestamp < ECHO_BRAIN_REPEAT_COOLDOWN_MILLIS) {
+                            put(key, timestamp)
+                        }
+                    }
+                }
+            }
+        }.getOrDefault(emptyMap())
+        synchronized(echoBrainInjectionHistoryLock) {
+            echoBrainRecentInjectionTimestamps.clear()
+            echoBrainRecentInjectionTimestamps.putAll(parsed)
+        }
+    }
+
+    /** Returns canonical song keys that remain blocked for 24 hours after injection. */
+    private fun currentEchoBrainCooldownSongKeys(): Set<String> {
+        val now = System.currentTimeMillis()
+        return synchronized(echoBrainInjectionHistoryLock) {
+            val activeKeys = EchoBrainQueuePlanner.activeCooldownSongKeys(
+                injectionTimestamps = echoBrainRecentInjectionTimestamps,
+                nowMillis = now,
+                cooldownMillis = ECHO_BRAIN_REPEAT_COOLDOWN_MILLIS,
+            )
+            echoBrainRecentInjectionTimestamps.keys.retainAll(activeKeys)
+            activeKeys
+        }
+    }
+
+    private suspend fun recordEchoBrainInjectionHistory(songKeys: Set<String>) {
+        if (songKeys.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val serialized = synchronized(echoBrainInjectionHistoryLock) {
+            val activeKeys = EchoBrainQueuePlanner.activeCooldownSongKeys(
+                injectionTimestamps = echoBrainRecentInjectionTimestamps,
+                nowMillis = now,
+                cooldownMillis = ECHO_BRAIN_REPEAT_COOLDOWN_MILLIS,
+            )
+            echoBrainRecentInjectionTimestamps.keys.retainAll(activeKeys)
+            songKeys.forEach { echoBrainRecentInjectionTimestamps[it] = now }
+            JSONObject(echoBrainRecentInjectionTimestamps as Map<*, *>).toString()
+        }
+        safeDataStoreEdit { prefs -> prefs[EchoBrainRecentInjectionHistoryKey] = serialized }
     }
 
     private fun seedLoudnessCacheFromPrefs() {

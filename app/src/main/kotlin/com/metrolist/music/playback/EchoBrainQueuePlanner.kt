@@ -133,6 +133,16 @@ internal object EchoBrainQueuePlanner {
     fun canonicalSongKeys(items: Iterable<MediaItem>): Set<String> =
         items.mapTo(mutableSetOf(), ::canonicalSongKey)
 
+    /** Returns songs that remain unavailable until their configured repeat cooldown expires. */
+    fun activeCooldownSongKeys(
+        injectionTimestamps: Map<String, Long>,
+        nowMillis: Long,
+        cooldownMillis: Long,
+    ): Set<String> =
+        injectionTimestamps
+            .filter { (_, injectedAtMillis) -> nowMillis - injectedAtMillis < cooldownMillis }
+            .keys
+
     private fun similarityScore(
         candidate: Song,
         seedArtistIds: Set<String>,

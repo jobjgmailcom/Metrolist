@@ -228,9 +228,9 @@
     <string name="echo_brain_alternative_versions_on">Remixes, live and acoustic versions may be injected when they meet the similarity rule.</string>
     <string name="echo_brain_alternative_versions_off">Only main recordings are injected; remixes, live, acoustic and cover versions are blocked.</string>
     <string name="echo_brain_network">Recommendation network use</string>
-    <string name="echo_brain_network_local">Local only</string>
-    <string name="echo_brain_network_local_desc">Use saved relationships only. No recommendation traffic is used.</string>
-    <string name="echo_brain_network_wifi">Wi-Fi and local</string>
+    <string name="echo_brain_network_local">Local mode (no network)</string>
+    <string name="echo_brain_network_local_desc">Uses only relations saved in MetroList. It does not query Wi-Fi or mobile data.</string>
+    <string name="echo_brain_network_wifi">Wi-Fi + local mode</string>
     <string name="echo_brain_network_wifi_desc">Use saved relationships anywhere and refresh radio candidates only on Wi-Fi.</string>
     <string name="echo_brain_network_any">Wi-Fi and mobile data</string>
     <string name="echo_brain_network_any_desc">Allow refreshes on any connected network.</string>
