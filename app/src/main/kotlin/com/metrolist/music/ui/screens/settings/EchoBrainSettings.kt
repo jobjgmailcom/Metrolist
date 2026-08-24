@@ -76,7 +76,7 @@ fun EchoBrainSettings(
             },
             title = stringResource(R.string.echo_brain_similarity),
             current = minimumSimilarity,
-            values = listOf(90, 80, 70),
+            values = listOf(90, 80, 70, 60),
             valueText = { value -> similarityLabel(value) },
             valueDescription = { value -> similarityDescription(value) },
         )
@@ -228,7 +228,8 @@ private fun similarityLabel(value: Int): String =
     when (value) {
         90 -> stringResource(R.string.echo_brain_similarity_90)
         80 -> stringResource(R.string.echo_brain_similarity_80)
-        else -> stringResource(R.string.echo_brain_similarity_70)
+        70 -> stringResource(R.string.echo_brain_similarity_70)
+        else -> stringResource(R.string.echo_brain_similarity_60)
     }
 
 @Composable
@@ -236,7 +237,8 @@ private fun similarityDescription(value: Int): String =
     when (value) {
         90 -> stringResource(R.string.echo_brain_similarity_90_desc)
         80 -> stringResource(R.string.echo_brain_similarity_80_desc)
-        else -> stringResource(R.string.echo_brain_similarity_70_desc)
+        70 -> stringResource(R.string.echo_brain_similarity_70_desc)
+        else -> stringResource(R.string.echo_brain_similarity_60_desc)
     }
 
 @Composable

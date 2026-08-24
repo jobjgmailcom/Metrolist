@@ -152,6 +152,8 @@ internal object EchoBrainQueuePlanner {
     ): Int {
         val song = candidate.song
         val artists = candidate.orderedArtists.map { it.id }.toSet()
+        // El año de publicación no suma ni resta afinidad: una relación de género/artista/contexto
+        // sigue siendo válida aunque la canción ancla y la candidata sean de décadas distintas.
         var score = 60 // The persisted related-song graph is the baseline relation signal.
         if (artists.any { it in seedArtistIds }) score += 30 // Ancla: la pista activa.
         if (artists.any { it in momentArtistIds }) score += 15 // Momento: la sesión reciente.
@@ -170,6 +172,7 @@ internal object EchoBrainQueuePlanner {
     ): Int {
         val metadata = candidate.metadata
         val artists = metadata?.artists?.mapNotNull { it.id }?.toSet().orEmpty()
+        // Radio también es neutral respecto al año; sólo importan las señales de relación y contexto.
         var score = 60 // Radio is the baseline relation signal.
         if (artists.any { it in seedArtists }) score += 30
         if (artists.any { it in momentArtistIds }) score += 15
