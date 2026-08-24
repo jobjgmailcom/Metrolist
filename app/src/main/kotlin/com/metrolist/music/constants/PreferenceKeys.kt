@@ -141,6 +141,7 @@ val EchoBrainMinimumSimilarityKey = intPreferencesKey("echoBrainMinimumSimilarit
 val EchoBrainAllowAlternativeVersionsKey = booleanPreferencesKey("echoBrainAllowAlternativeVersions")
 val EchoBrainArtistDiversityKey = stringPreferencesKey("echoBrainArtistDiversity")
 val EchoBrainListeningConfirmationKey = stringPreferencesKey("echoBrainListeningConfirmation")
+val EchoBrainQueueContinuityKey = stringPreferencesKey("echoBrainQueueContinuity")
 val EchoBrainNetworkModeKey = stringPreferencesKey("echoBrainNetworkMode")
 val EchoBrainRecentInjectionHistoryKey = stringPreferencesKey("echoBrainRecentInjectionHistory")
 
@@ -167,6 +168,17 @@ enum class EchoBrainListeningConfirmation(
     companion object {
         fun fromPreference(value: String?): EchoBrainListeningConfirmation =
             entries.find { it.name == value } ?: SIXTY_PERCENT
+    }
+}
+
+enum class EchoBrainQueueContinuity {
+    MIX_PRESERVING,
+    DOMINANT,
+    ;
+
+    companion object {
+        fun fromPreference(value: String?): EchoBrainQueueContinuity =
+            entries.find { it.name == value } ?: DOMINANT
     }
 }
 

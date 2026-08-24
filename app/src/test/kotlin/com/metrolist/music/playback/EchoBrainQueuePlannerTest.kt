@@ -297,6 +297,28 @@ class EchoBrainQueuePlannerTest {
                 hasInjectedRecommendations = false,
             ),
         )
+        assertEquals(
+            true,
+            EchoBrainQueuePlanner.shouldAutoInject(
+                currentIndex = 4,
+                mediaItemCount = 53,
+                currentIsEchoBrainRecommendation = false,
+                nextIsEchoBrainRecommendation = false,
+                hasInjectedRecommendations = true,
+                dominantMode = true,
+            ),
+        )
+        assertEquals(
+            false,
+            EchoBrainQueuePlanner.shouldAutoInject(
+                currentIndex = 4,
+                mediaItemCount = 53,
+                currentIsEchoBrainRecommendation = false,
+                nextIsEchoBrainRecommendation = false,
+                hasInjectedRecommendations = true,
+                dominantMode = false,
+            ),
+        )
     }
 
     private fun song(

@@ -128,6 +128,8 @@ import com.metrolist.music.constants.EchoBrainListeningConfirmationKey
 import com.metrolist.music.constants.EchoBrainMinimumSimilarityKey
 import com.metrolist.music.constants.EchoBrainNetworkMode
 import com.metrolist.music.constants.EchoBrainNetworkModeKey
+import com.metrolist.music.constants.EchoBrainQueueContinuity
+import com.metrolist.music.constants.EchoBrainQueueContinuityKey
 import com.metrolist.music.constants.EchoBrainRecentInjectionHistoryKey
 import com.metrolist.music.constants.DiscordActivityNameKey
 import com.metrolist.music.constants.DiscordActivityTypeKey
@@ -526,6 +528,8 @@ class MusicService :
     private var cachedEchoBrainArtistDiversity = EchoBrainArtistDiversity.BALANCED
     @Volatile
     private var cachedEchoBrainListeningConfirmation = EchoBrainListeningConfirmation.SIXTY_PERCENT
+    @Volatile
+    private var cachedEchoBrainQueueContinuity = EchoBrainQueueContinuity.DOMINANT
     @Volatile
     private var cachedEchoBrainNetworkMode = EchoBrainNetworkMode.WIFI_ONLY
     @Volatile
@@ -1242,6 +1246,12 @@ class MusicService :
                 .map { EchoBrainListeningConfirmation.fromPreference(it[EchoBrainListeningConfirmationKey]) }
                 .distinctUntilChanged()
                 .collect { cachedEchoBrainListeningConfirmation = it }
+        }
+        scope.launch {
+            dataStore.data
+                .map { EchoBrainQueueContinuity.fromPreference(it[EchoBrainQueueContinuityKey]) }
+                .distinctUntilChanged()
+                .collect { cachedEchoBrainQueueContinuity = it }
         }
         scope.launch {
             dataStore.data
@@ -3020,6 +3030,7 @@ class MusicService :
                 currentIsEchoBrainRecommendation = mediaItem?.metadata?.suggestedBy == echoBrainLabel,
                 nextIsEchoBrainRecommendation = nextMediaItem?.metadata?.suggestedBy == echoBrainLabel,
                 hasInjectedRecommendations = echoBrainInjectedItemIds.isNotEmpty(),
+                dominantMode = cachedEchoBrainQueueContinuity == EchoBrainQueueContinuity.DOMINANT,
             )
         ) {
             scheduleEchoBrainListeningConfirmation()

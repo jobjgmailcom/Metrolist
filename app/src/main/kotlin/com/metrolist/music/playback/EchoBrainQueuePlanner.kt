@@ -260,10 +260,12 @@ internal object EchoBrainQueuePlanner {
         currentIsEchoBrainRecommendation: Boolean,
         nextIsEchoBrainRecommendation: Boolean,
         hasInjectedRecommendations: Boolean,
+        dominantMode: Boolean = false,
     ): Boolean =
         currentIndex in 0 until mediaItemCount &&
             (currentIndex == 0 ||
                 (currentIsEchoBrainRecommendation && !nextIsEchoBrainRecommendation) ||
+                (dominantMode && hasInjectedRecommendations && !currentIsEchoBrainRecommendation) ||
                 (!hasInjectedRecommendations &&
                     mediaItemCount - currentIndex <= AUTO_TRIGGER_REMAINING_ITEMS))
 
