@@ -122,6 +122,45 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `radio fallback blocks remaster and radio edit variants of an existing recording`() {
+        val originalMixSong = mediaItem(
+            id = "mix-im-not-alone",
+            title = "I'm Not Alone",
+            artistId = "calvin-harris",
+        )
+        val selected = EchoBrainQueuePlanner.selectRadioItems(
+            candidates = listOf(
+                mediaItem("radio-edit", "I'm Not Alone (Radio Edit)", "calvin-harris"),
+                mediaItem("remaster", "I'm Not Alone (2009 Remaster)", "calvin-harris"),
+                mediaItem("fresh", "Related track", "related-artist"),
+            ),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            blockedSongKeys = EchoBrainQueuePlanner.canonicalSongKeys(listOf(originalMixSong)),
+            allowAlternativeVersions = true,
+        )
+
+        assertEquals(listOf("fresh"), selected.map { it.mediaId })
+    }
+
+    @Test
+    fun `artist diversity excludes a recent Echo Brain artist before selecting`() {
+        val repeatedArtist = song(id = "same-artist", artistId = "calvin-harris")
+        val relatedArtist = song(id = "related-artist", artistId = "david-guetta")
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = song(id = "seed", artistId = "anchor"),
+            relatedSongs = listOf(repeatedArtist, relatedArtist),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            blockedArtistKeys = setOf("calvinharris"),
+            minimumSimilarity = 60,
+        )
+
+        assertEquals(listOf("related-artist"), selected.map { it.mediaId })
+    }
+
+    @Test
     fun `strict 90 similarity accepts only anchor or reinforced local context`() {
         val seed = song(id = "seed", artistId = "anchor")
         val anchorMatch = song(id = "anchor-match", artistId = "anchor")
@@ -282,6 +321,7 @@ class EchoBrainQueuePlannerTest {
     private fun mediaItem(
         id: String,
         title: String = id,
+        artistId: String? = null,
     ): MediaItem =
         MediaItem.Builder()
             .setMediaId(id)
@@ -290,7 +330,7 @@ class EchoBrainQueuePlannerTest {
                 MediaMetadata(
                     id = id,
                     title = title,
-                    artists = emptyList(),
+                    artists = artistId?.let { listOf(MediaMetadata.Artist(id = it, name = it)) }.orEmpty(),
                     duration = 0,
                 ),
             ).build()

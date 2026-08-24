@@ -28,6 +28,7 @@ internal object EchoBrainQueuePlanner {
         queuedIds: Set<String>,
         previouslyInjectedIds: Set<String>,
         blockedSongKeys: Set<String> = emptySet(),
+        blockedArtistKeys: Set<String> = emptySet(),
         momentArtistIds: Set<String> = emptySet(),
         vaultArtistIds: Set<String> = emptySet(),
         minimumSimilarity: Int = 0,
@@ -44,6 +45,7 @@ internal object EchoBrainQueuePlanner {
                     candidate.id !in queuedIds &&
                     candidate.id !in previouslyInjectedIds &&
                     canonicalSongKey(candidate) !in blockedSongKeys &&
+                    primaryArtistKey(candidate) !in blockedArtistKeys &&
                     (allowAlternativeVersions || !isAlternativeVersion(candidate.song.title)) &&
                     similarityScore(
                         candidate,
@@ -83,6 +85,7 @@ internal object EchoBrainQueuePlanner {
         queuedIds: Set<String>,
         previouslyInjectedIds: Set<String>,
         blockedSongKeys: Set<String> = emptySet(),
+        blockedArtistKeys: Set<String> = emptySet(),
         seed: MediaItem? = null,
         momentArtistIds: Set<String> = emptySet(),
         vaultArtistIds: Set<String> = emptySet(),
@@ -101,6 +104,7 @@ internal object EchoBrainQueuePlanner {
                     candidate.mediaId !in queuedIds &&
                     candidate.mediaId !in previouslyInjectedIds &&
                     canonicalSongKey(candidate) !in blockedSongKeys &&
+                    primaryArtistKey(candidate) !in blockedArtistKeys &&
                     (allowAlternativeVersions || !isAlternativeVersion(candidate.metadata?.title.orEmpty())) &&
                     radioSimilarityScore(
                         candidate,
@@ -132,6 +136,10 @@ internal object EchoBrainQueuePlanner {
      */
     fun canonicalSongKeys(items: Iterable<MediaItem>): Set<String> =
         items.mapTo(mutableSetOf(), ::canonicalSongKey)
+
+    /** Primary artist keys are stable across media IDs and power diversity between cycles. */
+    fun primaryArtistKeys(items: Iterable<MediaItem>): Set<String> =
+        items.mapTo(mutableSetOf(), ::primaryArtistKey)
 
     /** Returns songs that remain unavailable until their configured repeat cooldown expires. */
     fun activeCooldownSongKeys(
@@ -210,7 +218,7 @@ internal object EchoBrainQueuePlanner {
         artistNames: List<String>,
         fallbackId: String,
     ): String {
-        val normalizedTitle = normalize(title)
+        val normalizedTitle = normalize(baseRecordingTitle(title))
         val normalizedArtists = artistNames.map(::normalize).filter(String::isNotBlank).sorted()
         return if (normalizedTitle.isBlank() && normalizedArtists.isEmpty()) {
             "id:${normalize(fallbackId)}"
@@ -223,6 +231,18 @@ internal object EchoBrainQueuePlanner {
         val normalizedTitle = normalize(title)
         return AlternativeVersionMarkers.any(normalizedTitle::contains)
     }
+
+    /**
+     * Collapses well-known suffixes so a remaster, radio edit or year edit cannot evade the
+     * original-queue, same-batch or daily-repeat guard by arriving under a different ID.
+     */
+    private fun baseRecordingTitle(title: String): String =
+        title.replace(
+            Regex(
+                """(?i)\s*[\[(]?\s*(?:\d{4}\s*)?(?:remaster(?:ed)?|radio\s*edit|edit|extended\s*(?:mix|version)?|club\s*mix|album\s*version|deluxe\s*version|single\s*version|mix)\s*[\])]?$""",
+            ),
+            "",
+        )
 
     private fun normalize(value: String): String =
         Normalizer.normalize(value, Normalizer.Form.NFD)
@@ -292,5 +312,13 @@ internal object EchoBrainQueuePlanner {
             "karaoke",
             "slowed",
             "spedup",
+            "radioedit",
+            "remaster",
+            "remastered",
+            "extendedmix",
+            "clubmix",
+            "albumversion",
+            "deluxeversion",
+            "singleversion",
         )
 }

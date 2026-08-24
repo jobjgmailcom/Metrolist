@@ -139,8 +139,36 @@ val EchoBrainEnabledKey = booleanPreferencesKey("echoBrainEnabled")
 const val DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY = 90
 val EchoBrainMinimumSimilarityKey = intPreferencesKey("echoBrainMinimumSimilarity")
 val EchoBrainAllowAlternativeVersionsKey = booleanPreferencesKey("echoBrainAllowAlternativeVersions")
+val EchoBrainArtistDiversityKey = stringPreferencesKey("echoBrainArtistDiversity")
+val EchoBrainListeningConfirmationKey = stringPreferencesKey("echoBrainListeningConfirmation")
 val EchoBrainNetworkModeKey = stringPreferencesKey("echoBrainNetworkMode")
 val EchoBrainRecentInjectionHistoryKey = stringPreferencesKey("echoBrainRecentInjectionHistory")
+
+enum class EchoBrainArtistDiversity {
+    UNLIMITED,
+    BALANCED,
+    HIGH,
+    ;
+
+    companion object {
+        fun fromPreference(value: String?): EchoBrainArtistDiversity =
+            entries.find { it.name == value } ?: BALANCED
+    }
+}
+
+enum class EchoBrainListeningConfirmation(
+    val percent: Int,
+) {
+    IMMEDIATE(0),
+    SIXTY_PERCENT(60),
+    EIGHTY_PERCENT(80),
+    ;
+
+    companion object {
+        fun fromPreference(value: String?): EchoBrainListeningConfirmation =
+            entries.find { it.name == value } ?: SIXTY_PERCENT
+    }
+}
 
 enum class EchoBrainNetworkMode {
     LOCAL_ONLY,
