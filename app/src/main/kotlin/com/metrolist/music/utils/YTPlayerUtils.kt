@@ -898,6 +898,16 @@ object YTPlayerUtils {
             System.currentTimeMillis() + PlaybackRecoveryPolicy.FAILED_CLIENT_BACKOFF_MILLIS
     }
 
+    /** A stream that never starts after validation is retried once with another exact client profile. */
+    fun markStreamClientUnresponsive(
+        videoId: String,
+        clientName: String?,
+    ) {
+        val normalizedClient = clientName?.trim()?.takeIf { it.isNotBlank() } ?: return
+        failedStreamClientsUntil["$videoId:$normalizedClient"] =
+            System.currentTimeMillis() + PlaybackRecoveryPolicy.FAILED_CLIENT_BACKOFF_MILLIS
+    }
+
     private fun isStreamClientTemporarilyBlocked(
         videoId: String,
         clientProfile: String,

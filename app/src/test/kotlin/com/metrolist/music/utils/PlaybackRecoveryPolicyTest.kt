@@ -22,4 +22,12 @@ class PlaybackRecoveryPolicyTest {
         assertEquals(false, PlaybackRecoveryPolicy.canReuseResolvedStream(now + 60_000L, now))
         assertEquals(false, PlaybackRecoveryPolicy.canReuseResolvedStream(now + 59_999L, now))
     }
+
+    @Test
+    fun `transition recovery only watches a requested early buffer stall`() {
+        assertEquals(true, PlaybackRecoveryPolicy.shouldRecoverTransitionStall(true, true, 4_999L, 5_000L))
+        assertEquals(false, PlaybackRecoveryPolicy.shouldRecoverTransitionStall(false, true, 0L, 5_000L))
+        assertEquals(false, PlaybackRecoveryPolicy.shouldRecoverTransitionStall(true, false, 0L, 5_000L))
+        assertEquals(false, PlaybackRecoveryPolicy.shouldRecoverTransitionStall(true, true, 5_000L, 5_000L))
+    }
 }

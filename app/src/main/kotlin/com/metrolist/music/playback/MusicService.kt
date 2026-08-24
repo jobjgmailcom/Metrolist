@@ -169,6 +169,7 @@ import com.metrolist.music.constants.PauseListenHistoryKey
 import com.metrolist.music.constants.PauseOnMute
 import com.metrolist.music.constants.PersistentQueueKey
 import com.metrolist.music.constants.PersistentShuffleAcrossQueuesKey
+import com.metrolist.music.constants.PlaybackRecoveryLastDiagnosticKey
 import com.metrolist.music.constants.PlayerVolumeKey
 import com.metrolist.music.constants.PreventDuplicateTracksInQueueKey
 import com.metrolist.music.constants.RememberShuffleAndRepeatKey
@@ -226,6 +227,7 @@ import com.metrolist.music.constants.LoudnessLevel
 import com.metrolist.music.constants.LoudnessLevelKey
 import com.metrolist.music.utils.CoilBitmapLoader
 import com.metrolist.music.utils.NetworkConnectivityObserver
+import com.metrolist.music.utils.PlaybackRecoveryPolicy
 import com.metrolist.music.utils.ScrobbleManager
 import com.metrolist.music.utils.SyncUtils
 import com.metrolist.music.utils.getArtistSeparator
@@ -504,6 +506,8 @@ class MusicService :
     private var retryCount = 0
     private var initialBufferRecoveryJob: Job? = null
     private var initialBufferRecoveryAttemptedMediaId: String? = null
+    private var transitionStallRecoveryJob: Job? = null
+    private var transitionStallRecoveryAttemptedMediaId: String? = null
     // True only when stopOnError() paused playback purely because of a network outage
     // (waitOnNetworkError exhausting its attempts). Lets triggerRetry() know it's safe —
     // and necessary — to explicitly resume playback once connectivity returns, rather than
@@ -3184,9 +3188,13 @@ class MusicService :
         initialBufferRecoveryJob?.cancel()
         initialBufferRecoveryJob = null
         initialBufferRecoveryAttemptedMediaId = null
+        transitionStallRecoveryJob?.cancel()
+        transitionStallRecoveryJob = null
+        transitionStallRecoveryAttemptedMediaId = null
         retryJob?.cancel()
         retryJob = null
         updateInitialBufferRecovery(player.playbackState)
+        updateTransitionStallRecovery(player.playbackState)
 
         previousEpisodeId?.let { episodeId ->
             if (previousEpisodePosition > 0) {
@@ -3296,11 +3304,11 @@ class MusicService :
         @Player.State playbackState: Int,
     ) {
         updateInitialBufferRecovery(playbackState)
+        updateTransitionStallRecovery(playbackState)
 
         if (playbackState == Player.STATE_ENDED) {
             // Check sleep timer guard - don't autoplay/repeat if sleep timer will pause
-            val timer = sleepTimer ?: return
-            if (timer.isActive && timer.pauseWhenSongEnd) {
+            if (sleepTimer?.let { it.isActive && it.pauseWhenSongEnd } == true) {
                 return
             }
 
@@ -3385,6 +3393,7 @@ class MusicService :
         }
 
         updateInitialBufferRecovery(player.playbackState)
+        updateTransitionStallRecovery(player.playbackState)
     }
 
     private fun updateInitialBufferRecovery(
@@ -3432,6 +3441,77 @@ class MusicService :
                     retryReason = "initial buffer stall",
                 )
             }
+    }
+
+    /**
+     * One bounded second-stage recovery after a newly selected item remained buffering despite an
+     * initial refresh. This is event-triggered, not a polling timer, and never runs for pauses.
+     */
+    private fun updateTransitionStallRecovery(
+        @Player.State playbackState: Int,
+    ) {
+        val mediaId = player.currentMediaItem?.mediaId
+        val shouldWatch =
+            mediaId != null &&
+                initialBufferRecoveryAttemptedMediaId == mediaId &&
+                transitionStallRecoveryAttemptedMediaId != mediaId &&
+                PlaybackRecoveryPolicy.shouldRecoverTransitionStall(
+                    isBuffering = playbackState == Player.STATE_BUFFERING,
+                    playWhenReady = player.playWhenReady,
+                    positionMs = player.currentPosition,
+                    initialPositionLimitMs = INITIAL_BUFFER_RECOVERY_POSITION_MS,
+                )
+
+        if (!shouldWatch) {
+            transitionStallRecoveryJob?.cancel()
+            transitionStallRecoveryJob = null
+            return
+        }
+        if (transitionStallRecoveryJob?.isActive == true) return
+
+        transitionStallRecoveryJob =
+            scope.launch {
+                delay(TRANSITION_STALL_RECOVERY_DELAY_MS)
+                if (!isCurrentTransitionStall(mediaId)) return@launch
+
+                transitionStallRecoveryAttemptedMediaId = mediaId
+                val failedStreamClient = songUrlCache.clientName(mediaId)
+                YTPlayerUtils.markStreamClientUnresponsive(mediaId, failedStreamClient)
+                recordPlaybackRecoveryDiagnostic(mediaId, "stream sin inicio; cambiando fuente")
+                performAggressiveCacheClear(mediaId)
+                refreshStreamAndRetry(
+                    mediaId = mediaId,
+                    failedStreamClient = failedStreamClient,
+                    refreshCipherConfig = false,
+                    failureStatusCode = null,
+                    retryReason = "transition stream stall",
+                )
+
+                delay(TRANSITION_STALL_FINAL_DELAY_MS)
+                if (isCurrentTransitionStall(mediaId)) {
+                    recordPlaybackRecoveryDiagnostic(mediaId, "sin inicio tras cambiar fuente; avanzando cola")
+                    markSongAsFailed(mediaId)
+                    handleFinalFailure()
+                }
+            }
+    }
+
+    private fun isCurrentTransitionStall(mediaId: String): Boolean =
+        player.currentMediaItem?.mediaId == mediaId &&
+            PlaybackRecoveryPolicy.shouldRecoverTransitionStall(
+                isBuffering = player.playbackState == Player.STATE_BUFFERING,
+                playWhenReady = player.playWhenReady,
+                positionMs = player.currentPosition,
+                initialPositionLimitMs = INITIAL_BUFFER_RECOVERY_POSITION_MS,
+            )
+
+    private suspend fun recordPlaybackRecoveryDiagnostic(
+        mediaId: String,
+        outcome: String,
+    ) {
+        val diagnostic = "transición · $mediaId · $outcome"
+        safeDataStoreEdit { prefs -> prefs[PlaybackRecoveryLastDiagnosticKey] = diagnostic }
+        Timber.tag(TAG).i("Playback recovery diagnostic: %s", diagnostic)
     }
 
     override fun onEvents(
@@ -4970,6 +5050,7 @@ class MusicService :
         player.removeListener(this)
         sleepTimer?.let { player.removeListener(it) }
         initialBufferRecoveryJob?.cancel()
+        transitionStallRecoveryJob?.cancel()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
         releaseExoPlayer(player)
@@ -5705,6 +5786,8 @@ class MusicService :
 
         private const val INITIAL_BUFFER_RECOVERY_DELAY_MS = 15_000L
         private const val INITIAL_BUFFER_RECOVERY_POSITION_MS = 5_000L
+        private const val TRANSITION_STALL_RECOVERY_DELAY_MS = 15_000L
+        private const val TRANSITION_STALL_FINAL_DELAY_MS = 15_000L
         private const val MAX_GAIN_MB = 300 // Maximum gain in millibels (3 dB)
         private const val MIN_GAIN_MB = -1500 // Minimum gain in millibels (-15 dB)
 

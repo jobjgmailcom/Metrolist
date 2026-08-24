@@ -147,6 +147,7 @@ val EchoBrainRecentInjectionHistoryKey = stringPreferencesKey("echoBrainRecentIn
 val EchoBrainRadioRelationCacheKey = stringPreferencesKey("echoBrainRadioRelationCache")
 val EchoBrainLastDiagnosticKey = stringPreferencesKey("echoBrainLastDiagnostic")
 val EchoBrainSequenceFeedbackKey = stringPreferencesKey("echoBrainSequenceFeedback")
+val PlaybackRecoveryLastDiagnosticKey = stringPreferencesKey("playbackRecoveryLastDiagnostic")
 
 enum class EchoBrainArtistDiversity {
     UNLIMITED,

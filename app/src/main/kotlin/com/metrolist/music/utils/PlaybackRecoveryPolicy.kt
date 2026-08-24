@@ -17,4 +17,11 @@ internal object PlaybackRecoveryPolicy {
         expiresAtMillis: Long,
         nowMillis: Long,
     ): Boolean = expiresAtMillis > nowMillis + STREAM_EXPIRY_SAFETY_MILLIS
+
+    fun shouldRecoverTransitionStall(
+        isBuffering: Boolean,
+        playWhenReady: Boolean,
+        positionMs: Long,
+        initialPositionLimitMs: Long,
+    ): Boolean = isBuffering && playWhenReady && positionMs < initialPositionLimitMs
 }
