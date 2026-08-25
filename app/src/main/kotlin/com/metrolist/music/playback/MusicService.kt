@@ -1140,14 +1140,6 @@ class MusicService :
             }
         }
 
-        scope.launch {
-            while (isActive) {
-                delay(5_000)
-                Timber.tag("DiscordSvc").v("polling: periodic syncDiscordState tick")
-                syncDiscordState()
-            }
-        }
-
         dataStore.data
             .map { it[EnableLastFMScrobblingKey] ?: false }
             .debounce(300)
@@ -1378,26 +1370,19 @@ class MusicService :
             }
         }
 
-        // Save queue periodically to prevent queue loss from crash or force kill
+        // Save queue periodically only while playing. Queue transitions, timeline updates and
+        // setting changes already save immediately; avoiding duplicate 10/15-second writes keeps
+        // the foreground service from waking storage and CPU unnecessarily during long sessions.
         scope.launch {
             while (isActive) {
-                delay(15.seconds)
-                if (cachedPersistentQueue) {
+                delay(PERSISTENT_QUEUE_SAVE_INTERVAL_MS)
+                if (cachedPersistentQueue && player.isPlaying) {
                     saveQueueToDisk()
                 }
                 val currentMetadata = player.currentMediaItem?.metadata
                 if (currentMetadata?.isEpisode == true && player.isPlaying && player.currentPosition > 0) {
                     previousEpisodePosition = player.currentPosition
                     saveEpisodePosition(currentMetadata.id, player.currentPosition)
-                }
-            }
-        }
-
-        scope.launch {
-            while (isActive) {
-                delay(10.seconds)
-                if (cachedPersistentQueue && player.isPlaying) {
-                    saveQueueToDisk()
                 }
             }
         }
@@ -5788,6 +5773,7 @@ class MusicService :
         private const val INITIAL_BUFFER_RECOVERY_POSITION_MS = 5_000L
         private const val TRANSITION_STALL_RECOVERY_DELAY_MS = 15_000L
         private const val TRANSITION_STALL_FINAL_DELAY_MS = 15_000L
+        private const val PERSISTENT_QUEUE_SAVE_INTERVAL_MS = 60_000L
         private const val MAX_GAIN_MB = 300 // Maximum gain in millibels (3 dB)
         private const val MIN_GAIN_MB = -1500 // Minimum gain in millibels (-15 dB)
 
