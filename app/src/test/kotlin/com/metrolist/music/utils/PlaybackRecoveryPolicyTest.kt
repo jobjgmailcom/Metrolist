@@ -30,4 +30,13 @@ class PlaybackRecoveryPolicyTest {
         assertEquals(false, PlaybackRecoveryPolicy.shouldRecoverTransitionStall(true, false, 0L, 5_000L))
         assertEquals(false, PlaybackRecoveryPolicy.shouldRecoverTransitionStall(true, true, 5_000L, 5_000L))
     }
+
+    @Test
+    fun `audio-start recovery catches ready tracks that never emit audio`() {
+        assertEquals(true, PlaybackRecoveryPolicy.shouldRecoverNoAudioStart(true, false, true, 0L, 5_000L))
+        assertEquals(false, PlaybackRecoveryPolicy.shouldRecoverNoAudioStart(false, false, true, 0L, 5_000L))
+        assertEquals(false, PlaybackRecoveryPolicy.shouldRecoverNoAudioStart(true, true, true, 0L, 5_000L))
+        assertEquals(false, PlaybackRecoveryPolicy.shouldRecoverNoAudioStart(true, false, false, 0L, 5_000L))
+        assertEquals(false, PlaybackRecoveryPolicy.shouldRecoverNoAudioStart(true, false, true, 5_000L, 5_000L))
+    }
 }

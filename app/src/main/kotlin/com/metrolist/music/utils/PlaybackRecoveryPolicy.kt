@@ -24,4 +24,12 @@ internal object PlaybackRecoveryPolicy {
         positionMs: Long,
         initialPositionLimitMs: Long,
     ): Boolean = isBuffering && playWhenReady && positionMs < initialPositionLimitMs
+
+    fun shouldRecoverNoAudioStart(
+        isReady: Boolean,
+        isPlaying: Boolean,
+        playWhenReady: Boolean,
+        positionMs: Long,
+        initialPositionLimitMs: Long,
+    ): Boolean = isReady && !isPlaying && playWhenReady && positionMs < initialPositionLimitMs
 }
