@@ -147,6 +147,9 @@ val EchoBrainRecentInjectionHistoryKey = stringPreferencesKey("echoBrainRecentIn
 val EchoBrainRadioRelationCacheKey = stringPreferencesKey("echoBrainRadioRelationCache")
 val EchoBrainLastDiagnosticKey = stringPreferencesKey("echoBrainLastDiagnostic")
 val EchoBrainSequenceFeedbackKey = stringPreferencesKey("echoBrainSequenceFeedback")
+// Compact, on-device profile used only to order candidates that already pass Echo Brain filters.
+val EchoBrainNeuroProfileKey = stringPreferencesKey("echoBrainNeuroProfile")
+val PlaybackRecoveryLastDiagnosticKey = stringPreferencesKey("playbackRecoveryLastDiagnostic")
 
 enum class EchoBrainArtistDiversity {
     UNLIMITED,

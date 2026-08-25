@@ -217,6 +217,36 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `neuro profile only orders candidates that already pass strict similarity`() {
+        val seed = song(id = "seed", artistId = "anchor")
+        val safeAnchorMatch = song(id = "safe", artistId = "anchor")
+        val profiledAnchorMatch = song(id = "profiled", artistId = "anchor")
+        val unrelatedProfiled = song(id = "unrelated", artistId = "other")
+
+        val ordered = EchoBrainQueuePlanner.select(
+            seed = seed,
+            relatedSongs = listOf(safeAnchorMatch, profiledAnchorMatch),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            neuroProfileScores = mapOf("profiled" to 100),
+            minimumSimilarity = 90,
+            maxItems = 1,
+        )
+        val blockedByThreshold = EchoBrainQueuePlanner.select(
+            seed = seed,
+            relatedSongs = listOf(unrelatedProfiled),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            neuroProfileScores = mapOf("unrelated" to 100),
+            minimumSimilarity = 90,
+            maxItems = 1,
+        )
+
+        assertEquals(listOf("profiled"), ordered.map { it.mediaId })
+        assertEquals(emptyList<String>(), blockedByThreshold.map { it.mediaId })
+    }
+
+    @Test
     fun `strict 90 similarity accepts only anchor or reinforced local context`() {
         val seed = song(id = "seed", artistId = "anchor")
         val anchorMatch = song(id = "anchor-match", artistId = "anchor")
