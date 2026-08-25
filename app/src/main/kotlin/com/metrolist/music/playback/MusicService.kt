@@ -125,6 +125,7 @@ import com.metrolist.music.constants.EchoBrainListeningConfirmation
 import com.metrolist.music.constants.EchoBrainListeningConfirmationKey
 import com.metrolist.music.constants.EchoBrainLastDiagnosticKey
 import com.metrolist.music.constants.EchoBrainMinimumSimilarityKey
+import com.metrolist.music.constants.EchoBrainNeuroProfileKey
 import com.metrolist.music.constants.EchoBrainNetworkMode
 import com.metrolist.music.constants.EchoBrainNetworkModeKey
 import com.metrolist.music.constants.EchoBrainQueueContinuity
@@ -517,6 +518,8 @@ class MusicService :
     private val echoBrainSequenceFeedback = mutableMapOf<String, Pair<Int, Long>>()
     private val echoBrainInjectedSequenceEdges = Collections.synchronizedMap(mutableMapOf<String, String>())
 
+    private val echoBrainNeuroProfile = EchoBrainNeuroProfile()
+
     // URL cache for stream URLs - class-level so it can be invalidated on errors
     private val songUrlCache = StreamUrlCache()
 
@@ -624,6 +627,7 @@ class MusicService :
         seedEchoBrainInjectionHistoryFromPrefs()
         seedEchoBrainRadioCacheFromPrefs()
         seedEchoBrainSequenceFeedbackFromPrefs()
+        seedEchoBrainNeuroProfileFromPrefs()
 
         val defaultMediaNotificationProvider =
             DefaultMediaNotificationProvider(
@@ -2270,6 +2274,9 @@ class MusicService :
                 if (player.currentMediaItem?.mediaId != seedMediaId) return@launch
 
                 val seedSong = withContext(Dispatchers.IO) { database.getSongById(seedMediaId) }
+                val neuroProfileScores = echoBrainNeuroProfile.candidateScores(
+                    relatedSongs.map { it.toMediaItem() },
+                )
                 val localRecommendations =
                     EchoBrainQueuePlanner.select(
                         seed = seedSong,
@@ -2281,6 +2288,7 @@ class MusicService :
                         momentArtistIds = momentArtistIds,
                         vaultArtistIds = vaultArtistIds,
                         sequenceFeedbackScores = sequenceFeedbackScores,
+                        neuroProfileScores = neuroProfileScores,
                         minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                         allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
                         maxItems = maximumBatchSize,
@@ -2407,6 +2415,7 @@ class MusicService :
                     .items
                     .filterExplicit(cachedHideExplicit)
                     .filterVideoSongs(cachedHideVideoSongs)
+            val initialNeuroProfileScores = echoBrainNeuroProfile.candidateScores(initialItems)
             val initialSelection = EchoBrainQueuePlanner.selectRadioItems(
                 candidates = initialItems,
                 queuedIds = excludedIds,
@@ -2417,6 +2426,7 @@ class MusicService :
                 momentArtistIds = momentArtistIds,
                 vaultArtistIds = vaultArtistIds,
                 sequenceFeedbackScores = sequenceFeedbackScores,
+                neuroProfileScores = initialNeuroProfileScores,
                 minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                 allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
                 maxItems = maxItems,
@@ -2424,10 +2434,11 @@ class MusicService :
             if (initialSelection.isNotEmpty() || !radioQueue.hasNextPage()) {
                 initialSelection
             } else {
+                val nextItems = radioQueue.nextPage()
+                    .filterExplicit(cachedHideExplicit)
+                    .filterVideoSongs(cachedHideVideoSongs)
                 EchoBrainQueuePlanner.selectRadioItems(
-                    candidates = radioQueue.nextPage()
-                        .filterExplicit(cachedHideExplicit)
-                        .filterVideoSongs(cachedHideVideoSongs),
+                    candidates = nextItems,
                     queuedIds = excludedIds,
                     previouslyInjectedIds = emptySet(),
                     blockedSongKeys = blockedSongKeys,
@@ -2436,6 +2447,7 @@ class MusicService :
                     momentArtistIds = momentArtistIds,
                     vaultArtistIds = vaultArtistIds,
                     sequenceFeedbackScores = sequenceFeedbackScores,
+                    neuroProfileScores = echoBrainNeuroProfile.candidateScores(nextItems),
                     minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                     allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
                     maxItems = maxItems,
@@ -2572,7 +2584,7 @@ class MusicService :
         val mediaId = player.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
         val confirmation = cachedEchoBrainListeningConfirmation
         if (confirmation == EchoBrainListeningConfirmation.IMMEDIATE) {
-            injectEchoBrainRecommendations(mediaId)
+            recordEchoBrainConfirmedListeningAndInject(mediaId)
             return
         }
 
@@ -2580,7 +2592,7 @@ class MusicService :
         if (duration == C.TIME_UNSET || duration <= 0L) return
         val triggerPosition = duration * confirmation.percent / 100L
         if (player.currentPosition >= triggerPosition) {
-            injectEchoBrainRecommendations(mediaId)
+            recordEchoBrainConfirmedListeningAndInject(mediaId)
             return
         }
         if (echoBrainConfirmationMediaId == mediaId && echoBrainConfirmationMessage != null) return
@@ -2590,13 +2602,23 @@ class MusicService :
         echoBrainConfirmationMessage = player.createMessage { _, _ ->
             echoBrainConfirmationMessage = null
             if (player.isPlaying && player.currentMediaItem?.mediaId == mediaId) {
-                injectEchoBrainRecommendations(mediaId)
+                recordEchoBrainConfirmedListeningAndInject(mediaId)
             }
         }.apply {
             setLooper(Looper.getMainLooper())
             setPosition(triggerPosition)
             send()
         }
+    }
+
+    /** Records one already-confirmed local listening signal, then keeps the existing injection path. */
+    private fun recordEchoBrainConfirmedListeningAndInject(mediaId: String) {
+        val item = player.currentMediaItem ?: return
+        if (item.mediaId != mediaId) return
+        if (echoBrainNeuroProfile.recordConfirmedPlayback(item)) {
+            scope.launch(Dispatchers.IO + SilentHandler) { persistEchoBrainNeuroProfile() }
+        }
+        injectEchoBrainRecommendations(mediaId)
     }
 
     /**
@@ -2734,6 +2756,14 @@ class MusicService :
             echoBrainSequenceFeedback.clear()
             echoBrainSequenceFeedback.putAll(parsed)
         }
+    }
+
+    private fun seedEchoBrainNeuroProfileFromPrefs() {
+        echoBrainNeuroProfile.restore(startupPrefs!![EchoBrainNeuroProfileKey].orEmpty())
+    }
+
+    private suspend fun persistEchoBrainNeuroProfile() {
+        safeDataStoreEdit { prefs -> prefs[EchoBrainNeuroProfileKey] = echoBrainNeuroProfile.serialize() }
     }
 
     private fun echoBrainSequenceFeedbackScores(seed: MediaItem): Map<String, Int> {
@@ -5161,6 +5191,9 @@ class MusicService :
             val durationMillis = skippedItem.metadata?.duration?.takeIf { it > 0 }?.times(1000L) ?: -1L
             if (EchoBrainQueuePlanner.isEarlySkip(oldPosition.positionMs, durationMillis)) {
                 echoBrainSkippedSongKeys += EchoBrainQueuePlanner.canonicalSongKeys(listOf(skippedItem))
+                if (echoBrainNeuroProfile.recordEarlySkip(skippedItem)) {
+                    scope.launch(Dispatchers.IO + SilentHandler) { persistEchoBrainNeuroProfile() }
+                }
                 scope.launch(Dispatchers.IO + SilentHandler) {
                     recordEchoBrainSequenceOutcome(skippedItem.mediaId, delta = -1)
                 }
