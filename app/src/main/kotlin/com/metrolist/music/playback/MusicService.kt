@@ -207,7 +207,6 @@ import com.metrolist.music.constants.LoudnessLevel
 import com.metrolist.music.constants.LoudnessLevelKey
 import com.metrolist.music.utils.CoilBitmapLoader
 import com.metrolist.music.utils.NetworkConnectivityObserver
-import com.metrolist.music.utils.PlaybackRecoveryPolicy
 import com.metrolist.music.utils.ScrobbleManager
 import com.metrolist.music.utils.SyncUtils
 import com.metrolist.music.utils.getArtistSeparator
@@ -3294,7 +3293,6 @@ class MusicService :
                     mediaId = mediaId,
                     failedStreamClient = failedStreamClient,
                     refreshCipherConfig = false,
-                    failureStatusCode = null,
                     retryReason = "initial buffer stall",
                 )
             }
@@ -3589,7 +3587,7 @@ class MusicService :
 
             isExpiredUrlError(error) -> {
                 Timber.tag(TAG).d("Expired URL (403/410) detected, refreshing stream URL")
-                handleExpiredUrlError(mediaId, failedStreamClient, getHttpResponseCode(error))
+                handleExpiredUrlError(mediaId, failedStreamClient)
                 return
             }
 
@@ -3601,7 +3599,7 @@ class MusicService :
 
             isRemotePlaybackError(error) -> {
                 Timber.tag(TAG).d("Remote playback error detected (${error.errorCode}), refreshing stream URL")
-                handleExpiredUrlError(mediaId, failedStreamClient, getHttpResponseCode(error))
+                handleExpiredUrlError(mediaId, failedStreamClient)
                 return
             }
 
@@ -3820,7 +3818,6 @@ class MusicService :
     private fun handleExpiredUrlError(
         mediaId: String?,
         failedStreamClient: String?,
-        failureStatusCode: Int?,
     ) {
         if (mediaId == null) {
             handleFinalFailure()
@@ -3831,7 +3828,6 @@ class MusicService :
             mediaId = mediaId,
             failedStreamClient = failedStreamClient,
             refreshCipherConfig = true,
-            failureStatusCode = failureStatusCode,
             retryReason = "expired URL error",
         )
     }
@@ -3840,7 +3836,6 @@ class MusicService :
         mediaId: String,
         failedStreamClient: String?,
         refreshCipherConfig: Boolean,
-        failureStatusCode: Int?,
         retryReason: String,
     ) {
         if (hasExceededRetryLimit(mediaId)) {
@@ -3853,10 +3848,9 @@ class MusicService :
         incrementRetryCount(mediaId)
 
         songUrlCache.invalidate(mediaId)
-        if (failedStreamClient?.startsWith("WEB_REMIX@") == true) {
+        if (failedStreamClient == "WEB_REMIX") {
             YTPlayerUtils.markWebRemixFailed(mediaId)
         }
-        YTPlayerUtils.markStreamClientFailed(mediaId, failedStreamClient, failureStatusCode)
         Timber.tag(TAG).d("Cleared cached URL for $mediaId after $retryReason (client=$failedStreamClient)")
 
         try {

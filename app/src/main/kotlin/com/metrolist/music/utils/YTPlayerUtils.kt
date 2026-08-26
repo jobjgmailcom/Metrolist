@@ -27,12 +27,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import timber.log.Timber
-import java.util.concurrent.ConcurrentHashMap
 
 object YTPlayerUtils {
     private const val logTag = "YTPlayerUtils"
@@ -45,29 +42,10 @@ object YTPlayerUtils {
     private val poTokenGenerator = PoTokenGenerator()
 
     private const val WEB_REMIX_FAILURE_TTL_MS = 5 * 60 * 1000L
-    private const val MAX_PLAYBACK_DATA_CACHE_ENTRIES = 128
-    private const val PLAYBACK_DATA_RESOLUTION_MUTEX_COUNT = 32
 
     // Temporarily skip WEB_REMIX after its stream is rejected so refresh can fall through without
     // permanently pinning a video to fallback clients after a transient CDN failure.
     private val webRemixFailures = java.util.concurrent.ConcurrentHashMap<String, Long>()
-
-    private data class PlaybackDataCacheKey(
-        val videoId: String,
-        val audioQuality: AudioQuality,
-        val networkMetered: Boolean,
-        val contentHints: ContentHints,
-        val sessionFingerprint: Int,
-    )
-
-    private data class CachedPlaybackData(
-        val playbackData: PlaybackData,
-        val expiresAtMillis: Long,
-    )
-
-    private val playbackDataCache = ConcurrentHashMap<PlaybackDataCacheKey, CachedPlaybackData>()
-    private val playbackDataResolutionMutexes = Array(PLAYBACK_DATA_RESOLUTION_MUTEX_COUNT) { Mutex() }
-    private val failedStreamClientsUntil = ConcurrentHashMap<String, Long>()
 
     fun markWebRemixFailed(videoId: String) {
         webRemixFailures[videoId] = System.currentTimeMillis()
@@ -137,46 +115,12 @@ object YTPlayerUtils {
         val streamClient: String = "unknown",
         val streamHeaders: Map<String, String> = emptyMap(),
     )
-
-    /**
-     * Shares a fresh resolution between concurrent Media3 reads of the same item. Results are held
-     * only in memory until one minute before the URL expires, never persisted with account data.
-     */
-    suspend fun playerResponseForPlayback(
-        videoId: String,
-        playlistId: String? = null,
-        audioQuality: AudioQuality,
-        connectivityManager: ConnectivityManager,
-        contentHints: ContentHints = ContentHints(),
-    ): Result<PlaybackData> {
-        val networkMetered = connectivityManager.isActiveNetworkMetered
-        val key = PlaybackDataCacheKey(
-            videoId = videoId,
-            audioQuality = audioQuality,
-            networkMetered = networkMetered,
-            contentHints = contentHints,
-            sessionFingerprint = playbackSessionFingerprint(),
-        )
-        cachedPlaybackData(key)?.let { return Result.success(it) }
-        val mutex = playbackDataResolutionMutexes[(key.hashCode() and Int.MAX_VALUE) % playbackDataResolutionMutexes.size]
-        return mutex.withLock {
-            cachedPlaybackData(key)?.let { return@withLock Result.success(it) }
-            resolvePlaybackData(
-                videoId = videoId,
-                playlistId = playlistId,
-                audioQuality = audioQuality,
-                connectivityManager = connectivityManager,
-                contentHints = contentHints,
-            ).onSuccess { playbackData -> cachePlaybackData(key, playbackData) }
-        }
-    }
-
     /**
      * Custom player response intended to use for playback.
      * Metadata like audioConfig and videoDetails are from [MAIN_CLIENT].
      * Metadata and stream formats may come from different clients.
      */
-    private suspend fun resolvePlaybackData(
+    suspend fun playerResponseForPlayback(
         videoId: String,
         playlistId: String? = null,
         audioQuality: AudioQuality,
@@ -264,11 +208,7 @@ object YTPlayerUtils {
                 ?: musicVideoType.contains("LIVE", ignoreCase = true).takeIf { it },
             isUploaded = isUploadedTrack,
         )
-        val availableStreamClients = fallbackStrategy.resolveClients(effectiveHints)
-        val streamClients =
-            availableStreamClients
-                .filterNot { client -> isStreamClientTemporarilyBlocked(videoId, streamClientProfile(client)) }
-                .ifEmpty { availableStreamClients }
+        val streamClients = fallbackStrategy.resolveClients(effectiveHints)
 
         var bestFallbackFormat: PlayerResponse.StreamingData.Format? = null
         var bestFallbackUrl: String? = null
@@ -585,7 +525,7 @@ object YTPlayerUtils {
             format,
             streamUrl,
             streamExpiresInSeconds,
-            streamClient = successClient?.let(::streamClientProfile) ?: "unknown",
+            streamClient = successClient?.clientName ?: "unknown",
             streamHeaders = successClient?.streamHeaders().orEmpty(),
         )
     }.onFailure { e ->
@@ -882,73 +822,6 @@ object YTPlayerUtils {
     }
 
     fun forceRefreshForVideo(videoId: String) {
-        playbackDataCache.keys.removeIf { it.videoId == videoId }
-        Timber.tag(logTag).d("Cleared in-memory playback data for videoId: $videoId")
-    }
-
-    /** Called only after a recoverable HTTP stream rejection, so another client is tried next. */
-    fun markStreamClientFailed(
-        videoId: String,
-        clientName: String?,
-        statusCode: Int?,
-    ) {
-        if (!PlaybackRecoveryPolicy.isRecoverableStreamStatus(statusCode)) return
-        val normalizedClient = clientName?.trim()?.takeIf { it.isNotBlank() } ?: return
-        failedStreamClientsUntil["$videoId:$normalizedClient"] =
-            System.currentTimeMillis() + PlaybackRecoveryPolicy.FAILED_CLIENT_BACKOFF_MILLIS
-    }
-
-    /** A stream that never starts after validation is retried once with another exact client profile. */
-    fun markStreamClientUnresponsive(
-        videoId: String,
-        clientName: String?,
-    ) {
-        val normalizedClient = clientName?.trim()?.takeIf { it.isNotBlank() } ?: return
-        failedStreamClientsUntil["$videoId:$normalizedClient"] =
-            System.currentTimeMillis() + PlaybackRecoveryPolicy.FAILED_CLIENT_BACKOFF_MILLIS
-    }
-
-    private fun isStreamClientTemporarilyBlocked(
-        videoId: String,
-        clientProfile: String,
-    ): Boolean {
-        val key = "$videoId:$clientProfile"
-        val until = failedStreamClientsUntil[key] ?: return false
-        if (until <= System.currentTimeMillis()) {
-            failedStreamClientsUntil.remove(key, until)
-            return false
-        }
-        return true
-    }
-
-    private fun streamClientProfile(client: YouTubeClient): String = "${client.clientName}@${client.clientVersion}"
-
-    private fun playbackSessionFingerprint(): Int =
-        listOf(YouTube.cookie.orEmpty(), YouTube.visitorData.orEmpty(), YouTube.dataSyncId.orEmpty()).hashCode()
-
-    private fun cachedPlaybackData(key: PlaybackDataCacheKey): PlaybackData? {
-        val cached = playbackDataCache[key] ?: return null
-        if (!PlaybackRecoveryPolicy.canReuseResolvedStream(cached.expiresAtMillis, System.currentTimeMillis())) {
-            playbackDataCache.remove(key, cached)
-            return null
-        }
-        return cached.playbackData
-    }
-
-    private fun cachePlaybackData(
-        key: PlaybackDataCacheKey,
-        playbackData: PlaybackData,
-    ) {
-        val now = System.currentTimeMillis()
-        val expiresAtMillis = now + playbackData.streamExpiresInSeconds.coerceAtLeast(1) * 1_000L
-        if (!PlaybackRecoveryPolicy.canReuseResolvedStream(expiresAtMillis, now)) return
-        playbackDataCache[key] = CachedPlaybackData(playbackData, expiresAtMillis)
-        playbackDataCache.entries.removeIf { (_, cached) ->
-            !PlaybackRecoveryPolicy.canReuseResolvedStream(cached.expiresAtMillis, now)
-        }
-        while (playbackDataCache.size > MAX_PLAYBACK_DATA_CACHE_ENTRIES) {
-            val oldest = playbackDataCache.entries.minByOrNull { it.value.expiresAtMillis } ?: break
-            playbackDataCache.remove(oldest.key, oldest.value)
-        }
+        Timber.tag(logTag).d("Force refreshing for videoId: $videoId")
     }
 }

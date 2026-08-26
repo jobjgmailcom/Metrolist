@@ -13,8 +13,7 @@ class ContentAwareFallbackStrategyTest {
     fun `default clients exclude known broken profiles`() {
         val clients = strategy.resolveClients(ContentHints())
 
-        assertEquals(YouTubeClient.ANDROID_VR_1_65_10, clients.first())
-        assertEquals(YouTubeClient.ANDROID_VR_1_43_32, clients[1])
+        assertEquals(YouTubeClient.VISIONOS, clients.first())
         assertFalse(clients.contains(YouTubeClient.IOS))
         assertFalse(clients.contains(YouTubeClient.IPADOS))
         assertFalse(clients.contains(YouTubeClient.ANDROID))
