@@ -216,6 +216,8 @@
     <string name="echo_brain_enable_to_inject">Enable Echo Brain to inject recommendations.</string>
     <string name="echo_brain_no_active_track">Start a track to request recommendations.</string>
     <string name="echo_brain_injection_requested">Recommendation request sent. New songs are added after the active track when available.</string>
+    <string name="echo_brain_status">Last local result</string>
+    <string name="echo_brain_status_idle">No recommendation request has completed yet.</string>
     <string name="echo_brain_how_it_works">How Echo Brain works</string>
     <string name="echo_brain_preserves_queue">Keeps your queue</string>
     <string name="echo_brain_preserves_queue_desc">It inserts only new songs after the current one and never removes the songs already in your mix.</string>

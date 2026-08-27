@@ -900,6 +900,8 @@
     <string name="echo_brain_enable_to_inject">Activa Echo Brain para inyectar recomendaciones.</string>
     <string name="echo_brain_no_active_track">Reproduce una canción para solicitar recomendaciones.</string>
     <string name="echo_brain_injection_requested">Solicitud enviada. Las canciones nuevas se añaden después de la pista activa cuando estén disponibles.</string>
+    <string name="echo_brain_status">Último resultado local</string>
+    <string name="echo_brain_status_idle">Aún no ha terminado ninguna solicitud de recomendaciones.</string>
     <string name="echo_brain_how_it_works">Cómo funciona Echo Brain</string>
     <string name="echo_brain_preserves_queue">Conserva tu cola</string>
     <string name="echo_brain_preserves_queue_desc">Inserta solo canciones nuevas después de la actual y nunca elimina las canciones que ya están en tu mix.</string>

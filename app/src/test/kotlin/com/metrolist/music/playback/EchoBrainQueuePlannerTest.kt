@@ -106,6 +106,73 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `strict radio relation supplies new diverse tracks for a long original mix`() {
+        val selected = EchoBrainQueuePlanner.selectRadioItems(
+            candidates = listOf(
+                mediaItem("active", "Tu Infame En...", "temerarios"),
+                mediaItem("in-mix", "La Culpa No Tengo Yo", "temerarios"),
+                mediaItem("related-one", "Y Que Me Importa", "primavera"),
+                mediaItem("related-two", "Yo Te Necesito", "bukis"),
+                mediaItem("related-three", "Total Que Más Da", "bronco"),
+            ),
+            queuedIds = setOf("active", "in-mix"),
+            previouslyInjectedIds = emptySet(),
+            // High diversity blocks the anchor artist but must not block the related-radio pool.
+            blockedArtistKeys = setOf("temerarios"),
+            seed = mediaItem("active", "Tu Infame En...", "temerarios"),
+            minimumSimilarity = 90,
+            allowAlternativeVersions = false,
+            maxItems = 3,
+        )
+
+        assertEquals(
+            listOf("related-one", "related-two", "related-three"),
+            selected.map { it.mediaId },
+        )
+    }
+
+    @Test
+    fun `strict radio does not elevate a candidate outside the bounded relation window`() {
+        val candidates = (0..8).map { index ->
+            mediaItem("radio-$index", "Related $index", "artist-$index")
+        }
+
+        val selected = EchoBrainQueuePlanner.selectRadioItems(
+            candidates = candidates,
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            minimumSimilarity = 90,
+            maxItems = 9,
+        )
+
+        assertEquals((0..7).map { "radio-$it" }, selected.map { it.mediaId })
+    }
+
+    @Test
+    fun `strict radio applies every hard exclusion before using its relation signal`() {
+        val original = mediaItem("original", "Already in the Mix", "original-artist")
+        val selected = EchoBrainQueuePlanner.selectRadioItems(
+            candidates = listOf(
+                mediaItem("queued", "Queued Track", "safe-artist"),
+                mediaItem("previous", "Previous Track", "safe-artist"),
+                mediaItem("duplicate-title", "ALREADY IN THE MIX", "original-artist"),
+                mediaItem("blocked-artist", "Blocked Artist Track", "blocked-artist"),
+                mediaItem("live-version", "Related Track (Live)", "live-artist"),
+                mediaItem("safe", "Related Main Recording", "safe-artist"),
+            ),
+            queuedIds = setOf("queued"),
+            previouslyInjectedIds = setOf("previous"),
+            blockedSongKeys = EchoBrainQueuePlanner.canonicalSongKeys(listOf(original)),
+            blockedArtistKeys = setOf("blockedartist"),
+            minimumSimilarity = 90,
+            allowAlternativeVersions = false,
+            maxItems = 3,
+        )
+
+        assertEquals(listOf("safe"), selected.map { it.mediaId })
+    }
+
+    @Test
     fun `radio fallback rejects a matching title with a different media id`() {
         val originalMixSong = mediaItem(id = "mix-tu-boda", title = "Tu Boda")
         val selected = EchoBrainQueuePlanner.selectRadioItems(

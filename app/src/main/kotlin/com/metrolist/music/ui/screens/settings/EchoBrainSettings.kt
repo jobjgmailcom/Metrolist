@@ -37,6 +37,7 @@ import com.metrolist.music.constants.EchoBrainAllowAlternativeVersionsKey
 import com.metrolist.music.constants.EchoBrainArtistDiversity
 import com.metrolist.music.constants.EchoBrainArtistDiversityKey
 import com.metrolist.music.constants.EchoBrainEnabledKey
+import com.metrolist.music.constants.EchoBrainLastDiagnosticKey
 import com.metrolist.music.constants.EchoBrainListeningConfirmation
 import com.metrolist.music.constants.EchoBrainListeningConfirmationKey
 import com.metrolist.music.constants.EchoBrainMinimumSimilarityKey
@@ -84,6 +85,7 @@ fun EchoBrainSettings(
     val (networkModeValue, onNetworkModeChange) =
         rememberPreference(EchoBrainNetworkModeKey, defaultValue = EchoBrainNetworkMode.WIFI_ONLY.name)
     val networkMode = EchoBrainNetworkMode.fromPreference(networkModeValue)
+    val (lastDiagnostic, _) = rememberPreference(EchoBrainLastDiagnosticKey, defaultValue = "")
 
     var showSimilarityDialog by rememberSaveable { mutableStateOf(false) }
     var showArtistDiversityDialog by rememberSaveable { mutableStateOf(false) }
@@ -264,6 +266,17 @@ fun EchoBrainSettings(
                     title = { Text(stringResource(R.string.echo_brain_network)) },
                     description = { Text(networkModeLabel(networkMode)) },
                     onClick = { showNetworkDialog = true },
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.radio),
+                    title = { Text(stringResource(R.string.echo_brain_status)) },
+                    description = {
+                        Text(
+                            lastDiagnostic.ifBlank {
+                                stringResource(R.string.echo_brain_status_idle)
+                            },
+                        )
+                    },
                 ),
             ),
         )

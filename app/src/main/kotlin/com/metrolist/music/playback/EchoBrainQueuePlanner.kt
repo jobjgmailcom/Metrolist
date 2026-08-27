@@ -121,31 +121,89 @@ internal object EchoBrainQueuePlanner {
                     candidate.mediaId !in previouslyInjectedIds &&
                     canonicalSongKey(candidate) !in blockedSongKeys &&
                     primaryArtistKey(candidate) !in blockedArtistKeys &&
-                    (allowAlternativeVersions || !isAlternativeVersion(candidate.metadata?.title.orEmpty())) &&
+                    (allowAlternativeVersions || !isAlternativeVersion(candidate.metadata?.title.orEmpty()))
+            }
+            // The first entries that remain after hard policy exclusions are the explicit
+            // relationship signal emitted by MetroList's radio source. Ranking them here avoids
+            // treating every different-artist radio result as an unrelated 60% match.
+            .mapIndexed { safePosition, candidate ->
+                RadioCandidate(
+                    item = candidate,
+                    relationshipScore = radioRelationshipScore(safePosition),
+                )
+            }
+            .filter { candidate ->
+                maxOf(
+                    candidate.relationshipScore,
                     radioSimilarityScore(
-                        candidate,
+                        candidate.item,
                         seedArtists,
                         seedAlbum,
                         momentArtistIds,
                         vaultArtistIds,
-                    ) >= minimumSimilarity
+                    ),
+                ) >= minimumSimilarity
             }
             .sortedWith(
-                compareByDescending<MediaItem> {
-                    radioSimilarityScore(
-                        it,
-                        seedArtists,
-                        seedAlbum,
-                        momentArtistIds,
-                        vaultArtistIds,
+                compareByDescending<RadioCandidate> {
+                    maxOf(
+                        it.relationshipScore,
+                        radioSimilarityScore(
+                            it.item,
+                            seedArtists,
+                            seedAlbum,
+                            momentArtistIds,
+                            vaultArtistIds,
+                        ),
                     )
-                }.thenByDescending { sequenceFeedbackScores[canonicalSongKey(it)] ?: 0 }
-                    .thenByDescending { neuroProfileScores[it.mediaId] ?: 0 },
+                }.thenByDescending { sequenceFeedbackScores[canonicalSongKey(it.item)] ?: 0 }
+                    .thenByDescending { neuroProfileScores[it.item.mediaId] ?: 0 },
             )
+            .map(RadioCandidate::item)
             .distinctBy(::canonicalSongKey)
             .distinctBy(::primaryArtistKey)
             .take(maxItems)
             .toList()
+    }
+
+    /** A radio source itself is a bounded similarity signal, never a general catalog search. */
+    private fun radioRelationshipScore(safePosition: Int): Int =
+        when (safePosition) {
+            0 -> 96
+            1 -> 95
+            2 -> 94
+            3 -> 93
+            4 -> 92
+            5 -> 91
+            6, 7 -> 90
+            else -> 88
+        }
+
+    private data class RadioCandidate(
+        val item: MediaItem,
+        val relationshipScore: Int,
+    )
+
+    /**
+     * Scores extra anchor, moment and vault signals found in radio candidates. The caller also
+     * accounts for their bounded position inside the existing related-radio result.
+     */
+    private fun radioSimilarityScore(
+        candidate: MediaItem,
+        seedArtists: Set<String>,
+        seedAlbum: String,
+        momentArtistIds: Set<String>,
+        vaultArtistIds: Set<String>,
+    ): Int {
+        val metadata = candidate.metadata
+        val artists = metadata?.artists?.mapNotNull { it.id }?.toSet().orEmpty()
+        // Radio also remains neutral to release year: relation and session context matter.
+        var score = 60 // Base score for a related-radio candidate without positional affinity.
+        if (artists.any { it in seedArtists }) score += 30
+        if (artists.any { it in momentArtistIds }) score += 15
+        if (artists.any { it in vaultArtistIds }) score += 10
+        if (seedAlbum.isNotBlank() && normalize(metadata?.album?.id.orEmpty()) == seedAlbum) score += 10
+        return score.coerceAtMost(100)
     }
 
     /**
@@ -190,23 +248,6 @@ internal object EchoBrainQueuePlanner {
         return score.coerceAtMost(100)
     }
 
-    private fun radioSimilarityScore(
-        candidate: MediaItem,
-        seedArtists: Set<String>,
-        seedAlbum: String,
-        momentArtistIds: Set<String>,
-        vaultArtistIds: Set<String>,
-    ): Int {
-        val metadata = candidate.metadata
-        val artists = metadata?.artists?.mapNotNull { it.id }?.toSet().orEmpty()
-        // Radio también es neutral respecto al año; sólo importan las señales de relación y contexto.
-        var score = 60 // Radio is the baseline relation signal.
-        if (artists.any { it in seedArtists }) score += 30
-        if (artists.any { it in momentArtistIds }) score += 15
-        if (artists.any { it in vaultArtistIds }) score += 10
-        if (seedAlbum.isNotBlank() && normalize(metadata?.album?.id.orEmpty()) == seedAlbum) score += 10
-        return score.coerceAtMost(100)
-    }
 
     private fun canonicalSongKey(song: Song): String =
         canonicalSongKey(
