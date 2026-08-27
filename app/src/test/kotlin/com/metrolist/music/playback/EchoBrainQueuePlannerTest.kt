@@ -69,6 +69,32 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `strict selection accepts a persisted direct relation from another regional artist`() {
+        val seed = song(
+            id = "la-culpa",
+            title = "La Culpa No Tengo Yo",
+            artistId = "temerarios",
+        )
+        val directRelatedSong = song(
+            id = "necesito-decirte",
+            title = "Necesito Decirte",
+            artistId = "conjunto-primavera",
+        )
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = seed,
+            relatedSongs = listOf(directRelatedSong),
+            queuedIds = setOf(seed.song.id),
+            previouslyInjectedIds = emptySet(),
+            minimumSimilarity = 90,
+            allowAlternativeVersions = false,
+            maxItems = 3,
+        )
+
+        assertEquals(listOf("necesito-decirte"), selected.map { it.mediaId })
+    }
+
+    @Test
     fun `select rejects the same recording when it has a different queue identifier`() {
         val originalMixSong = song(id = "mix-por-sus-besos", title = "POR SUS BESOS")
         val radioDuplicate = song(id = "radio-por-sus-besos", title = "Por sus Besos")
@@ -280,24 +306,24 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
-    fun `neuro profile only orders candidates that already pass strict similarity`() {
-        val seed = song(id = "seed", artistId = "anchor")
-        val safeAnchorMatch = song(id = "safe", artistId = "anchor")
-        val profiledAnchorMatch = song(id = "profiled", artistId = "anchor")
-        val unrelatedProfiled = song(id = "unrelated", artistId = "other")
+    fun `neuro profile only orders radio candidates that already pass strict similarity`() {
+        val seed = mediaItem(id = "seed", artistId = "anchor")
+        val safeAnchorMatch = mediaItem(id = "safe", artistId = "anchor")
+        val profiledAnchorMatch = mediaItem(id = "profiled", artistId = "anchor")
+        val unrelatedProfiled = mediaItem(id = "unrelated", artistId = "other")
 
-        val ordered = EchoBrainQueuePlanner.select(
+        val ordered = EchoBrainQueuePlanner.selectRadioItems(
             seed = seed,
-            relatedSongs = listOf(safeAnchorMatch, profiledAnchorMatch),
+            candidates = listOf(safeAnchorMatch, profiledAnchorMatch),
             queuedIds = emptySet(),
             previouslyInjectedIds = emptySet(),
             neuroProfileScores = mapOf("profiled" to 100),
             minimumSimilarity = 90,
             maxItems = 1,
         )
-        val blockedByThreshold = EchoBrainQueuePlanner.select(
+        val blockedByThreshold = EchoBrainQueuePlanner.selectRadioItems(
             seed = seed,
-            relatedSongs = listOf(unrelatedProfiled),
+            candidates = listOf(unrelatedProfiled),
             queuedIds = emptySet(),
             previouslyInjectedIds = emptySet(),
             neuroProfileScores = mapOf("unrelated" to 100),
@@ -310,7 +336,7 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
-    fun `strict 90 similarity accepts only anchor or reinforced local context`() {
+    fun `strict 90 similarity trusts a direct relationship and strengthens local context`() {
         val seed = song(id = "seed", artistId = "anchor")
         val anchorMatch = song(id = "anchor-match", artistId = "anchor")
         val reinforcedContext = song(id = "trusted-match", artistId = "trusted", liked = true)
@@ -328,7 +354,7 @@ class EchoBrainQueuePlannerTest {
             allowAlternativeVersions = false,
         )
 
-        assertEquals(listOf("trusted-match", "anchor-match"), selected.map { it.mediaId })
+        assertEquals(listOf("trusted-match", "anchor-match", "moment-only"), selected.map { it.mediaId })
     }
 
     @Test

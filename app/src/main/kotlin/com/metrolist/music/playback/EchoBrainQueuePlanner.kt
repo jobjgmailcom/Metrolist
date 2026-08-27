@@ -206,7 +206,9 @@ internal object EchoBrainQueuePlanner {
         val artists = candidate.orderedArtists.map { it.id }.toSet()
         // El año de publicación no suma ni resta afinidad: una relación de género/artista/contexto
         // sigue siendo válida aunque la canción ancla y la candidata sean de décadas distintas.
-        var score = 60 // The persisted related-song graph is the baseline relation signal.
+        // A stored edge comes only from the direct "related" response for the active track.
+        // It is stronger than a general radio page, whose position never proves affinity.
+        var score = 90
         if (artists.any { it in seedArtistIds }) score += 30 // Ancla: la pista activa.
         if (artists.any { it in momentArtistIds }) score += 15 // Momento: la sesión reciente.
         if (artists.any { it in vaultArtistIds }) score += 10 // Bóveda: gustos locales.
