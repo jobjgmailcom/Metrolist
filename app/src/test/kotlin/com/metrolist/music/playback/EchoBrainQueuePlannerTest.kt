@@ -106,50 +106,46 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
-    fun `strict radio relation supplies new diverse tracks for a long original mix`() {
+    fun `strict radio rejects unrelated top results even when the mix is long`() {
+        val seed = mediaItem("la-culpa", "La Culpa No Tengo Yo", "temerarios")
         val selected = EchoBrainQueuePlanner.selectRadioItems(
             candidates = listOf(
-                mediaItem("active", "Tu Infame En...", "temerarios"),
-                mediaItem("in-mix", "La Culpa No Tengo Yo", "temerarios"),
-                mediaItem("related-one", "Y Que Me Importa", "primavera"),
-                mediaItem("related-two", "Yo Te Necesito", "bukis"),
-                mediaItem("related-three", "Total Que Más Da", "bronco"),
+                mediaItem("tarzan-boy", "Tarzan Boy", "baltimora"),
+                mediaItem("rivers", "Rivers of Babylon", "boney-m"),
+                mediaItem("brother-louie", "Brother Louie", "modern-talking"),
             ),
-            queuedIds = setOf("active", "in-mix"),
+            queuedIds = setOf("la-culpa"),
             previouslyInjectedIds = emptySet(),
-            // High diversity blocks the anchor artist but must not block the related-radio pool.
             blockedArtistKeys = setOf("temerarios"),
-            seed = mediaItem("active", "Tu Infame En...", "temerarios"),
+            seed = seed,
             minimumSimilarity = 90,
             allowAlternativeVersions = false,
             maxItems = 3,
         )
 
-        assertEquals(
-            listOf("related-one", "related-two", "related-three"),
-            selected.map { it.mediaId },
-        )
+        assertEquals(emptyList<String>(), selected.map { it.mediaId })
     }
 
     @Test
-    fun `strict radio does not elevate a candidate outside the bounded relation window`() {
-        val candidates = (0..8).map { index ->
-            mediaItem("radio-$index", "Related $index", "artist-$index")
-        }
-
+    fun `strict radio accepts only explicit anchor evidence`() {
+        val seed = mediaItem("la-culpa", "La Culpa No Tengo Yo", "temerarios")
         val selected = EchoBrainQueuePlanner.selectRadioItems(
-            candidates = candidates,
+            candidates = listOf(
+                mediaItem("unrelated", "Tarzan Boy", "baltimora"),
+                mediaItem("same-artist", "Una canción relacionada", "temerarios"),
+            ),
             queuedIds = emptySet(),
             previouslyInjectedIds = emptySet(),
+            seed = seed,
             minimumSimilarity = 90,
-            maxItems = 9,
+            maxItems = 3,
         )
 
-        assertEquals((0..7).map { "radio-$it" }, selected.map { it.mediaId })
+        assertEquals(listOf("same-artist"), selected.map { it.mediaId })
     }
 
     @Test
-    fun `strict radio applies every hard exclusion before using its relation signal`() {
+    fun `radio applies every hard exclusion before using its relation signal`() {
         val original = mediaItem("original", "Already in the Mix", "original-artist")
         val selected = EchoBrainQueuePlanner.selectRadioItems(
             candidates = listOf(
@@ -164,7 +160,7 @@ class EchoBrainQueuePlannerTest {
             previouslyInjectedIds = setOf("previous"),
             blockedSongKeys = EchoBrainQueuePlanner.canonicalSongKeys(listOf(original)),
             blockedArtistKeys = setOf("blockedartist"),
-            minimumSimilarity = 90,
+            minimumSimilarity = 60,
             allowAlternativeVersions = false,
             maxItems = 3,
         )

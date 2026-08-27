@@ -91,8 +91,8 @@ internal object EchoBrainQueuePlanner {
     }
 
     /**
-     * Keeps the first safe items from MetroList's radio generator. Radio offers the initial
-     * relationship signal but must still meet the configured similarity threshold.
+     * Keeps safe items from MetroList's radio generator only when their metadata also supplies
+     * evidence for the selected similarity threshold. Radio ordering alone is not affinity.
      */
     fun selectRadioItems(
         candidates: List<MediaItem>,
@@ -123,70 +123,37 @@ internal object EchoBrainQueuePlanner {
                     primaryArtistKey(candidate) !in blockedArtistKeys &&
                     (allowAlternativeVersions || !isAlternativeVersion(candidate.metadata?.title.orEmpty()))
             }
-            // The first entries that remain after hard policy exclusions are the explicit
-            // relationship signal emitted by MetroList's radio source. Ranking them here avoids
-            // treating every different-artist radio result as an unrelated 60% match.
-            .mapIndexed { safePosition, candidate ->
-                RadioCandidate(
-                    item = candidate,
-                    relationshipScore = radioRelationshipScore(safePosition),
-                )
-            }
             .filter { candidate ->
-                maxOf(
-                    candidate.relationshipScore,
+                radioSimilarityScore(
+                    candidate,
+                    seedArtists,
+                    seedAlbum,
+                    momentArtistIds,
+                    vaultArtistIds,
+                ) >= minimumSimilarity
+            }
+            .sortedWith(
+                compareByDescending<MediaItem> {
                     radioSimilarityScore(
-                        candidate.item,
+                        it,
                         seedArtists,
                         seedAlbum,
                         momentArtistIds,
                         vaultArtistIds,
-                    ),
-                ) >= minimumSimilarity
-            }
-            .sortedWith(
-                compareByDescending<RadioCandidate> {
-                    maxOf(
-                        it.relationshipScore,
-                        radioSimilarityScore(
-                            it.item,
-                            seedArtists,
-                            seedAlbum,
-                            momentArtistIds,
-                            vaultArtistIds,
-                        ),
                     )
-                }.thenByDescending { sequenceFeedbackScores[canonicalSongKey(it.item)] ?: 0 }
-                    .thenByDescending { neuroProfileScores[it.item.mediaId] ?: 0 },
+                }.thenByDescending { sequenceFeedbackScores[canonicalSongKey(it)] ?: 0 }
+                    .thenByDescending { neuroProfileScores[it.mediaId] ?: 0 },
             )
-            .map(RadioCandidate::item)
             .distinctBy(::canonicalSongKey)
             .distinctBy(::primaryArtistKey)
             .take(maxItems)
             .toList()
     }
 
-    /** A radio source itself is a bounded similarity signal, never a general catalog search. */
-    private fun radioRelationshipScore(safePosition: Int): Int =
-        when (safePosition) {
-            0 -> 96
-            1 -> 95
-            2 -> 94
-            3 -> 93
-            4 -> 92
-            5 -> 91
-            6, 7 -> 90
-            else -> 88
-        }
-
-    private data class RadioCandidate(
-        val item: MediaItem,
-        val relationshipScore: Int,
-    )
-
     /**
-     * Scores extra anchor, moment and vault signals found in radio candidates. The caller also
-     * accounts for their bounded position inside the existing related-radio result.
+     * Scores explicit anchor, moment and vault signals found in radio candidates. Their position
+     * in a radio page never contributes to this score, because a radio page is not a proof that
+     * every top result shares the listener's selected affinity.
      */
     private fun radioSimilarityScore(
         candidate: MediaItem,
