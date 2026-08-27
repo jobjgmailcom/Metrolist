@@ -560,6 +560,7 @@ class MusicService :
     private val echoBrainInjectedSequenceEdges = Collections.synchronizedMap(mutableMapOf<String, String>())
 
     private val echoBrainNeuroProfile = EchoBrainNeuroProfile()
+    private val echoBrainLiteRanker by lazy { EchoBrainLiteRanker(this) }
 
     // URL cache for stream URLs - class-level so it can be invalidated on errors
     private val songUrlCache = StreamUrlCache()
@@ -2459,7 +2460,7 @@ class MusicService :
                 val neuroProfileScores = echoBrainNeuroProfile.candidateScores(
                     relatedSongs.map { it.toMediaItem() },
                 )
-                val localRecommendations =
+                val localRecommendationPool =
                     EchoBrainQueuePlanner.select(
                         seed = seedSong,
                         relatedSongs = relatedSongs,
@@ -2473,8 +2474,15 @@ class MusicService :
                         neuroProfileScores = neuroProfileScores,
                         minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                         allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
-                        maxItems = maximumBatchSize,
+                        // Reorder a small group only after all hard policy checks have passed.
+                        maxItems = maximumBatchSize * 4,
                     )
+                val localRecommendations =
+                    echoBrainLiteRanker.reorderEligible(
+                        seed = seedItem,
+                        candidates = localRecommendationPool,
+                        neuroProfileScores = neuroProfileScores,
+                    ).take(maximumBatchSize)
                 val usedLocalRelationship = localRecommendations.isNotEmpty()
                 val recommendations =
                     if (localRecommendations.isNotEmpty() || !allowNetwork) {
@@ -2596,9 +2604,9 @@ class MusicService :
                 neuroProfileScores = initialNeuroProfileScores,
                 minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                 allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
-                maxItems = maxItems,
+                maxItems = maxItems * 4,
             )
-            if (initialSelection.isNotEmpty() || !radioQueue.hasNextPage()) {
+            val radioSelection = if (initialSelection.isNotEmpty() || !radioQueue.hasNextPage()) {
                 initialSelection
             } else {
                 val nextItems = radioQueue.nextPage()
@@ -2617,9 +2625,14 @@ class MusicService :
                     neuroProfileScores = echoBrainNeuroProfile.candidateScores(nextItems),
                     minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                     allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
-                    maxItems = maxItems,
+                    maxItems = maxItems * 4,
                 )
             }
+            echoBrainLiteRanker.reorderEligible(
+                seed = seed,
+                candidates = radioSelection,
+                neuroProfileScores = echoBrainNeuroProfile.candidateScores(radioSelection),
+            ).take(maxItems)
         }.onFailure { error ->
             Timber.tag(TAG).w(error, "Echo Brain radio fallback failed for %s", seedMediaId)
         }.getOrDefault(emptyList())

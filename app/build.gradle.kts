@@ -250,6 +250,7 @@ android {
 
     androidResources {
         generateLocaleConfig = true
+        noCompress += "tflite"
     }
 
     packaging {
@@ -349,6 +350,8 @@ dependencies {
     implementation(libs.guava)
     implementation(libs.coroutines.guava)
     implementation(libs.concurrent.futures)
+    // CPU-only on-device ranker. It never downloads a model or contacts a service.
+    implementation(libs.litert)
 
     implementation(libs.activity)
     implementation(libs.hilt.navigation)
