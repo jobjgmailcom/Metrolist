@@ -45,6 +45,8 @@ internal object EchoBrainQueuePlanner {
         neuroProfileScores: Map<String, Int> = emptyMap(),
         minimumSimilarity: Int = 0,
         allowAlternativeVersions: Boolean = true,
+        allowedArtistKeys: Set<String> = emptySet(),
+        limitToAllowedArtists: Boolean = false,
         maxItems: Int = DEFAULT_BATCH_SIZE,
     ): List<MediaItem> {
         val seedArtistIds = seed?.orderedArtists?.map { it.id }?.toSet().orEmpty()
@@ -58,6 +60,7 @@ internal object EchoBrainQueuePlanner {
                     candidate.id !in previouslyInjectedIds &&
                     canonicalSongKey(candidate) !in blockedSongKeys &&
                     primaryArtistKey(candidate) !in blockedArtistKeys &&
+                    (!limitToAllowedArtists || primaryArtistKey(candidate) in allowedArtistKeys) &&
                     (allowAlternativeVersions || !isAlternativeVersion(candidate.song.title)) &&
                     similarityScore(
                         candidate,
@@ -107,6 +110,8 @@ internal object EchoBrainQueuePlanner {
         neuroProfileScores: Map<String, Int> = emptyMap(),
         minimumSimilarity: Int = 0,
         allowAlternativeVersions: Boolean = true,
+        allowedArtistKeys: Set<String> = emptySet(),
+        limitToAllowedArtists: Boolean = false,
         maxItems: Int = DEFAULT_BATCH_SIZE,
     ): List<MediaItem> {
         val seedMetadata = seed?.metadata
@@ -121,6 +126,7 @@ internal object EchoBrainQueuePlanner {
                     candidate.mediaId !in previouslyInjectedIds &&
                     canonicalSongKey(candidate) !in blockedSongKeys &&
                     primaryArtistKey(candidate) !in blockedArtistKeys &&
+                    (!limitToAllowedArtists || primaryArtistKey(candidate) in allowedArtistKeys) &&
                     (allowAlternativeVersions || !isAlternativeVersion(candidate.metadata?.title.orEmpty()))
             }
             .filter { candidate ->

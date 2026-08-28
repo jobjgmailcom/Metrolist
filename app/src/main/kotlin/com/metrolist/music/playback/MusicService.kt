@@ -124,6 +124,8 @@ import com.metrolist.music.constants.DisableLoadMoreWhenRepeatAllKey
 import com.metrolist.music.constants.EchoBrainAllowAlternativeVersionsKey
 import com.metrolist.music.constants.EchoBrainArtistDiversity
 import com.metrolist.music.constants.EchoBrainArtistDiversityKey
+import com.metrolist.music.constants.EchoBrainArtistWhitelistEnabledKey
+import com.metrolist.music.constants.EchoBrainArtistWhitelistKey
 import com.metrolist.music.constants.EchoBrainEnabledKey
 import com.metrolist.music.constants.EchoBrainListeningConfirmation
 import com.metrolist.music.constants.EchoBrainListeningConfirmationKey
@@ -542,6 +544,10 @@ class MusicService :
     private var cachedEchoBrainQueueContinuity = EchoBrainQueueContinuity.DOMINANT
     @Volatile
     private var cachedEchoBrainNetworkMode = EchoBrainNetworkMode.WIFI_ONLY
+    @Volatile
+    private var cachedEchoBrainArtistWhitelistEnabled = false
+    @Volatile
+    private var cachedEchoBrainAllowedArtistKeys: Set<String> = emptySet()
     @Volatile
     private var cachedEchoBrainVaultArtistIds: Set<String>? = null
     private val echoBrainInjectionHistoryLock = Any()
@@ -1281,6 +1287,18 @@ class MusicService :
                 .map { EchoBrainNetworkMode.fromPreference(it[EchoBrainNetworkModeKey]) }
                 .distinctUntilChanged()
                 .collect { cachedEchoBrainNetworkMode = it }
+        }
+        scope.launch {
+            dataStore.data
+                .map { it[EchoBrainArtistWhitelistEnabledKey] ?: false }
+                .distinctUntilChanged()
+                .collect { cachedEchoBrainArtistWhitelistEnabled = it }
+        }
+        scope.launch {
+            dataStore.data
+                .map { EchoBrainArtistWhitelist.keys(it[EchoBrainArtistWhitelistKey].orEmpty()) }
+                .distinctUntilChanged()
+                .collect { cachedEchoBrainAllowedArtistKeys = it }
         }
         // Keep InnerTubeX extraction in sync with the stream source toggles.
         // Map to the derived set + distinctUntilChanged so an unrelated preference write doesn't
@@ -2474,6 +2492,8 @@ class MusicService :
                         neuroProfileScores = neuroProfileScores,
                         minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                         allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
+                        allowedArtistKeys = cachedEchoBrainAllowedArtistKeys,
+                        limitToAllowedArtists = cachedEchoBrainArtistWhitelistEnabled,
                         // Reorder a small group only after all hard policy checks have passed.
                         maxItems = maximumBatchSize * 4,
                     )
@@ -2498,6 +2518,8 @@ class MusicService :
                                 momentArtistIds = momentArtistIds,
                                 vaultArtistIds = vaultArtistIds,
                                 sequenceFeedbackScores = sequenceFeedbackScores,
+                                allowedArtistKeys = cachedEchoBrainAllowedArtistKeys,
+                                limitToAllowedArtists = cachedEchoBrainArtistWhitelistEnabled,
                                 maxItems = maximumBatchSize,
                             )
                         }
@@ -2507,7 +2529,12 @@ class MusicService :
                         activePosition = currentIndex + 1,
                         requestedSize = maximumBatchSize,
                         insertedSize = 0,
-                        outcome = "sin candidata que alcance ${cachedEchoBrainMinimumSimilarity}%",
+                        outcome =
+                            if (cachedEchoBrainArtistWhitelistEnabled) {
+                                "lista blanca sin candidata autorizada"
+                            } else {
+                                "sin candidata que alcance ${cachedEchoBrainMinimumSimilarity}%"
+                            },
                     )
                     Timber.tag(TAG).w("Echo Brain found no new recommendations for %s; it will retry automatically", seedMediaId)
                     return@launch
@@ -2578,6 +2605,8 @@ class MusicService :
         momentArtistIds: Set<String>,
         vaultArtistIds: Set<String>,
         sequenceFeedbackScores: Map<String, Int>,
+        allowedArtistKeys: Set<String>,
+        limitToAllowedArtists: Boolean,
         maxItems: Int,
     ): List<MediaItem> =
         runCatching {
@@ -2604,6 +2633,8 @@ class MusicService :
                 neuroProfileScores = initialNeuroProfileScores,
                 minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                 allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
+                allowedArtistKeys = allowedArtistKeys,
+                limitToAllowedArtists = limitToAllowedArtists,
                 maxItems = maxItems * 4,
             )
             val radioSelection = if (initialSelection.isNotEmpty() || !radioQueue.hasNextPage()) {
@@ -2625,6 +2656,8 @@ class MusicService :
                     neuroProfileScores = echoBrainNeuroProfile.candidateScores(nextItems),
                     minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                     allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
+                    allowedArtistKeys = allowedArtistKeys,
+                    limitToAllowedArtists = limitToAllowedArtists,
                     maxItems = maxItems * 4,
                 )
             }

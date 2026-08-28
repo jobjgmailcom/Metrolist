@@ -21,12 +21,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.metrolist.music.LocalPlayerAwareWindowInsets
@@ -36,6 +38,8 @@ import com.metrolist.music.constants.DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY
 import com.metrolist.music.constants.EchoBrainAllowAlternativeVersionsKey
 import com.metrolist.music.constants.EchoBrainArtistDiversity
 import com.metrolist.music.constants.EchoBrainArtistDiversityKey
+import com.metrolist.music.constants.EchoBrainArtistWhitelistEnabledKey
+import com.metrolist.music.constants.EchoBrainArtistWhitelistKey
 import com.metrolist.music.constants.EchoBrainEnabledKey
 import com.metrolist.music.constants.EchoBrainLastDiagnosticKey
 import com.metrolist.music.constants.EchoBrainListeningConfirmation
@@ -49,7 +53,9 @@ import com.metrolist.music.ui.component.EnumDialog
 import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.ui.component.Material3SettingsItem
+import com.metrolist.music.ui.component.TextFieldDialog
 import com.metrolist.music.ui.utils.backToMain
+import com.metrolist.music.playback.EchoBrainArtistWhitelist
 import com.metrolist.music.utils.rememberPreference
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,6 +76,13 @@ fun EchoBrainSettings(
     val (artistDiversityValue, onArtistDiversityChange) =
         rememberPreference(EchoBrainArtistDiversityKey, defaultValue = EchoBrainArtistDiversity.BALANCED.name)
     val artistDiversity = EchoBrainArtistDiversity.fromPreference(artistDiversityValue)
+    val (artistWhitelistEnabled, onArtistWhitelistEnabledChange) =
+        rememberPreference(EchoBrainArtistWhitelistEnabledKey, defaultValue = false)
+    val (serializedArtistWhitelist, onSerializedArtistWhitelistChange) =
+        rememberPreference(EchoBrainArtistWhitelistKey, defaultValue = "")
+    val artistWhitelist = remember(serializedArtistWhitelist) {
+        EchoBrainArtistWhitelist.parse(serializedArtistWhitelist)
+    }
     val (listeningConfirmationValue, onListeningConfirmationChange) =
         rememberPreference(
             EchoBrainListeningConfirmationKey,
@@ -92,6 +105,33 @@ fun EchoBrainSettings(
     var showListeningConfirmationDialog by rememberSaveable { mutableStateOf(false) }
     var showQueueContinuityDialog by rememberSaveable { mutableStateOf(false) }
     var showNetworkDialog by rememberSaveable { mutableStateOf(false) }
+    var showArtistWhitelistDialog by rememberSaveable { mutableStateOf(false) }
+
+    if (showArtistWhitelistDialog) {
+        TextFieldDialog(
+            onDismiss = { showArtistWhitelistDialog = false },
+            title = { Text(stringResource(R.string.echo_brain_artist_whitelist_edit)) },
+            initialTextFieldValue = TextFieldValue(serializedArtistWhitelist),
+            placeholder = { Text(stringResource(R.string.echo_brain_artist_whitelist_placeholder)) },
+            singleLine = false,
+            maxLines = 12,
+            isInputValid = { true },
+            onDone = { rawArtists ->
+                onSerializedArtistWhitelistChange(EchoBrainArtistWhitelist.serialize(rawArtists))
+            },
+            extraContent = {
+                Text(
+                    text = stringResource(
+                        R.string.echo_brain_artist_whitelist_editor_desc,
+                        EchoBrainArtistWhitelist.MAX_ARTISTS,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            },
+        )
+    }
 
     if (showSimilarityDialog) {
         EnumDialog(
@@ -248,6 +288,43 @@ fun EchoBrainSettings(
                     title = { Text(stringResource(R.string.echo_brain_artist_diversity)) },
                     description = { Text(artistDiversityLabel(artistDiversity)) },
                     onClick = { showArtistDiversityDialog = true },
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.group),
+                    title = { Text(stringResource(R.string.echo_brain_artist_whitelist)) },
+                    description = {
+                        Text(
+                            stringResource(
+                                if (artistWhitelistEnabled) {
+                                    R.string.echo_brain_artist_whitelist_on
+                                } else {
+                                    R.string.echo_brain_artist_whitelist_off
+                                },
+                                artistWhitelist.size,
+                            ),
+                        )
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = artistWhitelistEnabled,
+                            onCheckedChange = onArtistWhitelistEnabledChange,
+                        )
+                    },
+                    onClick = { onArtistWhitelistEnabledChange(!artistWhitelistEnabled) },
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.edit),
+                    title = { Text(stringResource(R.string.echo_brain_artist_whitelist_edit)) },
+                    description = {
+                        Text(
+                            stringResource(
+                                R.string.echo_brain_artist_whitelist_count,
+                                artistWhitelist.size,
+                                EchoBrainArtistWhitelist.MAX_ARTISTS,
+                            ),
+                        )
+                    },
+                    onClick = { showArtistWhitelistDialog = true },
                 ),
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.timer),

@@ -95,6 +95,45 @@ class EchoBrainQueuePlannerTest {
     }
 
     @Test
+    fun `artist whitelist permits only selected Echo Brain candidates and preserves queue exclusions`() {
+        val seed = song(id = "la-culpa", artistId = "temerarios")
+        val allowed = song(id = "primavera", artistId = "conjunto-primavera")
+        val excluded = song(id = "ajena", artistId = "baltimora")
+        val queuedOriginal = song(id = "original", artistId = "conjunto-primavera")
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = seed,
+            relatedSongs = listOf(allowed, excluded, queuedOriginal),
+            queuedIds = setOf(seed.id, queuedOriginal.id),
+            previouslyInjectedIds = emptySet(),
+            minimumSimilarity = 90,
+            allowedArtistKeys = setOf("conjuntoprimavera"),
+            limitToAllowedArtists = true,
+        )
+
+        assertEquals(listOf("primavera"), selected.map { it.mediaId })
+    }
+
+    @Test
+    fun `artist whitelist also limits radio fallback candidates`() {
+        val seed = mediaItem(id = "seed", artistId = "temerarios")
+        val selected = EchoBrainQueuePlanner.selectRadioItems(
+            seed = seed,
+            candidates = listOf(
+                mediaItem(id = "allowed", artistId = "temerarios"),
+                mediaItem(id = "outside", artistId = "other-artist"),
+            ),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            minimumSimilarity = 90,
+            allowedArtistKeys = setOf("temerarios"),
+            limitToAllowedArtists = true,
+        )
+
+        assertEquals(listOf("allowed"), selected.map { it.mediaId })
+    }
+
+    @Test
     fun `select rejects the same recording when it has a different queue identifier`() {
         val originalMixSong = song(id = "mix-por-sus-besos", title = "POR SUS BESOS")
         val radioDuplicate = song(id = "radio-por-sus-besos", title = "Por sus Besos")
