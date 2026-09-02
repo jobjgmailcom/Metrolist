@@ -652,6 +652,7 @@ class PlayerConnection(
     }
 
     override fun onRepeatModeChanged(mode: Int) {
+        if (mode != player.repeatMode) return
         repeatMode.value = mode
         updateCanSkipPreviousAndNext()
     }
