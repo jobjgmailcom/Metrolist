@@ -110,11 +110,6 @@ import com.metrolist.music.constants.AudioTrackPlaybackParamsKey
 import com.metrolist.music.constants.AutoDownloadOnLikeKey
 import com.metrolist.music.constants.AutoLoadMoreKey
 import com.metrolist.music.constants.AutoSkipNextOnErrorKey
-import com.metrolist.music.constants.StreamSourceAndroidVRKey
-import com.metrolist.music.constants.StreamSourceTVHTML5Key
-import com.metrolist.music.constants.StreamSourceVisionOSKey
-import com.metrolist.music.constants.StreamSourceWebCreatorKey
-import com.metrolist.music.constants.StreamSourceWebRemixKey
 import com.metrolist.music.constants.AutoplayKey
 import com.metrolist.music.constants.CrossfadeDurationKey
 import com.metrolist.music.constants.CrossfadeEnabledKey
@@ -1309,24 +1304,6 @@ class MusicService :
                 .distinctUntilChanged()
                 .collect { cachedEchoBrainAllowedArtistKeys = it }
         }
-        // Keep InnerTubeX extraction in sync with the stream source toggles.
-        // Map to the derived set + distinctUntilChanged so an unrelated preference write doesn't
-        // rebuild the set and rewrite the @Volatile field on every DataStore emission.
-        scope.launch {
-            dataStore.data
-                .map { prefs ->
-                    buildSet {
-                        if (prefs[StreamSourceWebRemixKey] == false) add("WEB_REMIX")
-                        if (prefs[StreamSourceTVHTML5Key] == false) add("TVHTML5")
-                        if (prefs[StreamSourceAndroidVRKey] == false) add("ANDROID_VR")
-                        if (prefs[StreamSourceVisionOSKey] == false) add("VISIONOS")
-                        if (prefs[StreamSourceWebCreatorKey] == false) add("WEB_CREATOR")
-                    }
-                }
-                .distinctUntilChanged()
-                .collect { InnerTubeXPlayer.disabledStreamClients = it }
-        }
-
         if (startupPrefs!![PersistentQueueKey] ?: true) {
             val queueFile = filesDir.resolve(PERSISTENT_QUEUE_FILE)
             if (queueFile.exists()) {
