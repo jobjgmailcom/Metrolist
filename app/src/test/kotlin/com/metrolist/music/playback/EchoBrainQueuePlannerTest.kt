@@ -577,4 +577,24 @@ class EchoBrainQueuePlannerTest {
                     duration = 0,
                 ),
             ).build()
+    @Test
+    fun `live and remix filter remains active when alternative versions are allowed`() {
+        val seed = song(id = "seed", artistId = "anchor")
+        val live = song(id = "live", title = "Tema (Live)", artistId = "related-live")
+        val enVivo = song(id = "en-vivo", title = "Tema en vivo", artistId = "related-en-vivo")
+        val remix = song(id = "remix", title = "Tema Remix", artistId = "related-remix")
+        val main = song(id = "main", title = "Tema principal", artistId = "related-main")
+
+        val selected = EchoBrainQueuePlanner.select(
+            seed = seed,
+            relatedSongs = listOf(live, enVivo, remix, main),
+            queuedIds = emptySet(),
+            previouslyInjectedIds = emptySet(),
+            minimumSimilarity = 60,
+            allowAlternativeVersions = true,
+            excludeLiveRemix = true,
+        )
+
+        assertEquals(listOf("main"), selected.map { it.mediaId })
+    }
 }

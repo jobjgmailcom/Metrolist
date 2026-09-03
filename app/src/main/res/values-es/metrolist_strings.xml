@@ -217,6 +217,9 @@
     <string name="echo_brain_alternative_versions">Permitir versiones alternativas</string>
     <string name="echo_brain_alternative_versions_on">Puede inyectar remixes y versiones en vivo o acústicas si cumplen la regla de similitud.</string>
     <string name="echo_brain_alternative_versions_off">Solo se inyectan grabaciones principales; se bloquean remixes, directos, acústicas y covers.</string>
+    <string name="echo_brain_exclude_live_remix">Excluir directos y remixes</string>
+    <string name="echo_brain_exclude_live_remix_on">Bloquea automáticamente versiones Live, En Vivo y Remix.</string>
+    <string name="echo_brain_exclude_live_remix_off">Permite directos y remixes si pasan los demás filtros.</string>
     <string name="echo_brain_artist_diversity">Diversidad de artistas</string>
     <string name="echo_brain_artist_diversity_unlimited">Sin límite</string>
     <string name="echo_brain_artist_diversity_unlimited_desc">Permite el mismo artista cuando supera la regla de similitud.</string>

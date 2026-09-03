@@ -145,6 +145,7 @@ val EchoBrainQueueContinuityKey = stringPreferencesKey("echoBrainQueueContinuity
 val EchoBrainNetworkModeKey = stringPreferencesKey("echoBrainNetworkMode")
 val EchoBrainArtistWhitelistEnabledKey = booleanPreferencesKey("echoBrainArtistWhitelistEnabled")
 val EchoBrainArtistWhitelistKey = stringPreferencesKey("echoBrainArtistWhitelist")
+val EchoBrainExcludeLiveRemixKey = booleanPreferencesKey("echoBrainExcludeLiveRemix")
 val EchoBrainRecentInjectionHistoryKey = stringPreferencesKey("echoBrainRecentInjectionHistory")
 val EchoBrainRadioRelationCacheKey = stringPreferencesKey("echoBrainRadioRelationCache")
 val EchoBrainLastDiagnosticKey = stringPreferencesKey("echoBrainLastDiagnostic")

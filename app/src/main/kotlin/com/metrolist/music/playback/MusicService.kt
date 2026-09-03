@@ -126,6 +126,7 @@ import com.metrolist.music.constants.EchoBrainArtistDiversity
 import com.metrolist.music.constants.EchoBrainArtistDiversityKey
 import com.metrolist.music.constants.EchoBrainArtistWhitelistEnabledKey
 import com.metrolist.music.constants.EchoBrainArtistWhitelistKey
+import com.metrolist.music.constants.EchoBrainExcludeLiveRemixKey
 import com.metrolist.music.constants.EchoBrainEnabledKey
 import com.metrolist.music.constants.EchoBrainListeningConfirmation
 import com.metrolist.music.constants.EchoBrainListeningConfirmationKey
@@ -536,6 +537,8 @@ class MusicService :
     private var cachedEchoBrainMinimumSimilarity = DEFAULT_ECHO_BRAIN_MINIMUM_SIMILARITY
     @Volatile
     private var cachedEchoBrainAllowAlternativeVersions = false
+    @Volatile
+    private var cachedEchoBrainExcludeLiveRemix = true
     @Volatile
     private var cachedEchoBrainArtistDiversity = EchoBrainArtistDiversity.BALANCED
     @Volatile
@@ -1263,6 +1266,12 @@ class MusicService :
                 .map { it[EchoBrainAllowAlternativeVersionsKey] ?: false }
                 .distinctUntilChanged()
                 .collect { cachedEchoBrainAllowAlternativeVersions = it }
+        }
+        scope.launch {
+            dataStore.data
+                .map { it[EchoBrainExcludeLiveRemixKey] ?: true }
+                .distinctUntilChanged()
+                .collect { cachedEchoBrainExcludeLiveRemix = it }
         }
         scope.launch {
             dataStore.data
@@ -2492,6 +2501,7 @@ class MusicService :
                         neuroProfileScores = neuroProfileScores,
                         minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                         allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
+                        excludeLiveRemix = cachedEchoBrainExcludeLiveRemix,
                         allowedArtistKeys = cachedEchoBrainAllowedArtistKeys,
                         limitToAllowedArtists = cachedEchoBrainArtistWhitelistEnabled,
                         // Reorder a small group only after all hard policy checks have passed.
@@ -2633,6 +2643,7 @@ class MusicService :
                 neuroProfileScores = initialNeuroProfileScores,
                 minimumSimilarity = cachedEchoBrainMinimumSimilarity,
                 allowAlternativeVersions = cachedEchoBrainAllowAlternativeVersions,
+                excludeLiveRemix = cachedEchoBrainExcludeLiveRemix,
                 allowedArtistKeys = allowedArtistKeys,
                 limitToAllowedArtists = limitToAllowedArtists,
                 maxItems = maxItems * 4,

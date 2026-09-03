@@ -40,6 +40,7 @@ import com.metrolist.music.constants.EchoBrainArtistDiversity
 import com.metrolist.music.constants.EchoBrainArtistDiversityKey
 import com.metrolist.music.constants.EchoBrainArtistWhitelistEnabledKey
 import com.metrolist.music.constants.EchoBrainArtistWhitelistKey
+import com.metrolist.music.constants.EchoBrainExcludeLiveRemixKey
 import com.metrolist.music.constants.EchoBrainEnabledKey
 import com.metrolist.music.constants.EchoBrainLastDiagnosticKey
 import com.metrolist.music.constants.EchoBrainListeningConfirmation
@@ -73,6 +74,8 @@ fun EchoBrainSettings(
         )
     val (allowAlternativeVersions, onAllowAlternativeVersionsChange) =
         rememberPreference(EchoBrainAllowAlternativeVersionsKey, defaultValue = false)
+    val (excludeLiveRemix, onExcludeLiveRemixChange) =
+        rememberPreference(EchoBrainExcludeLiveRemixKey, defaultValue = true)
     val (artistDiversityValue, onArtistDiversityChange) =
         rememberPreference(EchoBrainArtistDiversityKey, defaultValue = EchoBrainArtistDiversity.BALANCED.name)
     val artistDiversity = EchoBrainArtistDiversity.fromPreference(artistDiversityValue)
@@ -282,6 +285,18 @@ fun EchoBrainSettings(
                         )
                     },
                     onClick = { onAllowAlternativeVersionsChange(!allowAlternativeVersions) },
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.music_note),
+                    title = { Text(stringResource(R.string.echo_brain_exclude_live_remix)) },
+                    description = { Text(stringResource(if (excludeLiveRemix) R.string.echo_brain_exclude_live_remix_on else R.string.echo_brain_exclude_live_remix_off)) },
+                    trailingContent = {
+                        Switch(
+                            checked = excludeLiveRemix,
+                            onCheckedChange = onExcludeLiveRemixChange,
+                        )
+                    },
+                    onClick = { onExcludeLiveRemixChange(!excludeLiveRemix) },
                 ),
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.group),

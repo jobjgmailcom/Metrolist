@@ -45,6 +45,7 @@ internal object EchoBrainQueuePlanner {
         neuroProfileScores: Map<String, Int> = emptyMap(),
         minimumSimilarity: Int = 0,
         allowAlternativeVersions: Boolean = true,
+        excludeLiveRemix: Boolean = true,
         allowedArtistKeys: Set<String> = emptySet(),
         limitToAllowedArtists: Boolean = false,
         maxItems: Int = DEFAULT_BATCH_SIZE,
@@ -61,6 +62,7 @@ internal object EchoBrainQueuePlanner {
                     canonicalSongKey(candidate) !in blockedSongKeys &&
                     primaryArtistKey(candidate) !in blockedArtistKeys &&
                     (!limitToAllowedArtists || primaryArtistKey(candidate) in allowedArtistKeys) &&
+                    (!excludeLiveRemix || !isLiveOrRemixVersion(candidate.song.title)) &&
                     (allowAlternativeVersions || !isAlternativeVersion(candidate.song.title)) &&
                     similarityScore(
                         candidate,
@@ -110,6 +112,7 @@ internal object EchoBrainQueuePlanner {
         neuroProfileScores: Map<String, Int> = emptyMap(),
         minimumSimilarity: Int = 0,
         allowAlternativeVersions: Boolean = true,
+        excludeLiveRemix: Boolean = true,
         allowedArtistKeys: Set<String> = emptySet(),
         limitToAllowedArtists: Boolean = false,
         maxItems: Int = DEFAULT_BATCH_SIZE,
@@ -127,6 +130,7 @@ internal object EchoBrainQueuePlanner {
                     canonicalSongKey(candidate) !in blockedSongKeys &&
                     primaryArtistKey(candidate) !in blockedArtistKeys &&
                     (!limitToAllowedArtists || primaryArtistKey(candidate) in allowedArtistKeys) &&
+                    (!excludeLiveRemix || !isLiveOrRemixVersion(candidate.metadata?.title.orEmpty())) &&
                     (allowAlternativeVersions || !isAlternativeVersion(candidate.metadata?.title.orEmpty()))
             }
             .filter { candidate ->
@@ -267,6 +271,11 @@ internal object EchoBrainQueuePlanner {
         return AlternativeVersionMarkers.any(normalizedTitle::contains)
     }
 
+    private fun isLiveOrRemixVersion(title: String): Boolean {
+        val normalizedTitle = normalize(title)
+        return LiveRemixMarkers.any(normalizedTitle::contains)
+    }
+
     /**
      * Collapses well-known suffixes so a remaster, radio edit or year edit cannot evade the
      * original-queue, same-batch or daily-repeat guard by arriving under a different ID.
@@ -333,6 +342,9 @@ internal object EchoBrainQueuePlanner {
             value += amount
         }
     }
+
+    private val LiveRemixMarkers =
+        listOf("live", "envivo", "remix")
 
     private val AlternativeVersionMarkers =
         listOf(
