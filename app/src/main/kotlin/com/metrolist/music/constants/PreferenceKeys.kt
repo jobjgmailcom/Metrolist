@@ -153,6 +153,11 @@ val EchoBrainSequenceFeedbackKey = stringPreferencesKey("echoBrainSequenceFeedba
 // Compact, on-device profile used only to order candidates that already pass Echo Brain filters.
 val EchoBrainNeuroProfileKey = stringPreferencesKey("echoBrainNeuroProfile")
 val PlaybackRecoveryLastDiagnosticKey = stringPreferencesKey("playbackRecoveryLastDiagnostic")
+val StreamSourceWebRemixKey = booleanPreferencesKey("streamSourceWebRemix")
+val StreamSourceTVHTML5Key = booleanPreferencesKey("streamSourceTVHTML5")
+val StreamSourceAndroidVRKey = booleanPreferencesKey("streamSourceAndroidVR")
+val StreamSourceVisionOSKey = booleanPreferencesKey("streamSourceVisionOS")
+val StreamSourceWebCreatorKey = booleanPreferencesKey("streamSourceWebCreator")
 
 enum class EchoBrainArtistDiversity {
     UNLIMITED,
