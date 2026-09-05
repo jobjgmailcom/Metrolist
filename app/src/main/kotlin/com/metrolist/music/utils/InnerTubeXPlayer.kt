@@ -92,16 +92,33 @@ object InnerTubeXPlayer {
             throw error
         } catch (error: StreamResolveException) {
             val cause = error.cause
-            Result.failure(
-                if (error.reason == StreamResolveException.Reason.NETWORK && cause != null) {
-                    cause
-                } else {
-                    error
-                },
+            fallbackOrPrimaryFailure(
+                videoId = videoId,
+                primaryFailure =
+                    if (error.reason == StreamResolveException.Reason.NETWORK && cause != null) {
+                        cause
+                    } else {
+                        error
+                    },
             )
         } catch (error: Exception) {
-            Result.failure(error)
+            fallbackOrPrimaryFailure(videoId, error)
         }
+
+    private suspend fun fallbackOrPrimaryFailure(
+        videoId: String,
+        primaryFailure: Throwable,
+    ): Result<PlaybackData> =
+        SimpMusicFallbackPlayer.playerResponseForPlayback(videoId).fold(
+            onSuccess = { fallback ->
+                Timber.tag(TAG).w("Using SimpMusic fallback for video=%s", videoId)
+                Result.success(fallback)
+            },
+            onFailure = {
+                Timber.tag(TAG).w(primaryFailure, "Primary and SimpMusic extractors failed for video=%s", videoId)
+                Result.failure(primaryFailure)
+            },
+        )
 
     fun markWebRemixFailed(videoId: String) {
         webRemixFailures[videoId] = System.currentTimeMillis()

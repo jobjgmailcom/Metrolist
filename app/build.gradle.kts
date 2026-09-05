@@ -405,6 +405,8 @@ dependencies {
     ksp(libs.hilt.compiler)
 
     implementation(project(":innertube"))
+    // Independent SimpMusic/BravePipe fallback for stream extraction.
+    implementation(libs.brave.extractor)
     implementation(project(":kugou"))
     implementation(project(":lrclib"))
     implementation(project(":lastfm"))
